@@ -10,12 +10,12 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
-    if (pathname !== "/login" && !isAuthenticated) {
+    if (pathname !== "/login" && pathname !== "/register" && !isAuthenticated) {
       router.push("/login");
     }
   }, [isAuthenticated, pathname, router]);
 
-  if (pathname === "/login") return <>{children}</>;
+  if (pathname === "/login" || pathname === "/register") return <>{children}</>;
 
   if (!isAuthenticated) return null;
 

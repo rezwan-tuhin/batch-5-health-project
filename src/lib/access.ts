@@ -9,7 +9,7 @@ import type {
 } from "@/lib/dummy-data";
 
 export const canViewPatients = (role: Role) =>
-  role === "regulator" || role === "admin";
+  role === "regulator" || role === "admin" || role === "provider";
 
 export const canViewProviders = (role: Role) =>
   role === "regulator" || role === "admin";

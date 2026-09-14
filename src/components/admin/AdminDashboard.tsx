@@ -2,37 +2,63 @@
 
 import Link from "next/link";
 import { useAppSelector } from "@/store/hooks";
-import { users, auditLog } from "@/lib/dummy-data";
+import {
+  useUsers,
+  usePatients,
+  useProviders,
+  useConsents,
+  useRecords,
+  useEmergency,
+  useAudit,
+} from "@/hooks";
 import { roleAccent } from "@/lib/roles";
 import Card from "@/components/Card";
 import Badge from "@/components/Badge";
+import { QueryError, CardGridSkeleton } from "@/components/QueryState";
 
 export default function AdminDashboard() {
   const user = useAppSelector((s) => s.auth.user);
-  const patients = useAppSelector((s) => s.patients.list);
-  const providers = useAppSelector((s) => s.providers.list);
-  const consents = useAppSelector((s) => s.consents.list);
-  const records = useAppSelector((s) => s.records.list);
-  const emergency = useAppSelector((s) => s.emergency.list);
   const accent = user ? roleAccent[user.role] : roleAccent.admin;
 
-  const byRole = users.reduce<Record<string, number>>((acc, u) => {
+  const { data: users } = useUsers({ enabled: !!user });
+  const { data: patients } = usePatients({ enabled: !!user });
+  const { data: providers } = useProviders({ enabled: !!user });
+  const { data: consents } = useConsents({ enabled: !!user });
+  const { data: records } = useRecords({ enabled: !!user });
+  const { data: emergency } = useEmergency({ enabled: !!user });
+  const {
+    data: audit,
+    isLoading: auditLoading,
+    isError,
+    error,
+  } = useAudit({ enabled: !!user });
+
+  if (!user) return null;
+
+  const userList = users ?? [];
+  const byRole = userList.reduce<Record<string, number>>((acc, u) => {
     acc[u.role] = (acc[u.role] ?? 0) + 1;
     return acc;
   }, {});
 
-  const totalUsers = users.length;
-  const verifiedProviders = providers.filter((p) => p.verified).length;
-  const activeConsents = consents.filter((c) => c.active).length;
-  const activeEmergency = emergency.filter((e) => e.active).length;
-  const anchoredRecords = records.filter((r) => !r.tombstoned).length;
+  const providerList = providers ?? [];
+  const consentList = consents ?? [];
+  const recordList = records ?? [];
+
+  const totalUsers = userList.length;
+  const verifiedProviders = providerList.filter((p) => p.verified).length;
+  const activeConsents = consentList.filter((c) => c.active).length;
+  const activeEmergency = (emergency ?? []).filter((e) => e.active).length;
+  const anchoredRecords = recordList.filter((r) => !r.tombstoned).length;
 
   return (
     <div className="flex flex-1 flex-col">
       <div className="border-b border-zinc-800 px-8 py-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl font-semibold text-white">System Administration</h1>
+            <h1 className="text-xl font-semibold text-white">
+              System Administration
+            </h1>
             <p className="mt-1 text-sm text-zinc-400">
               Users, roles, network health and audit trail
             </p>
@@ -55,6 +81,7 @@ export default function AdminDashboard() {
       </div>
 
       <div className="flex-1 space-y-6 p-8">
+        {isError && <QueryError error={error} />}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
             <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
@@ -73,7 +100,7 @@ export default function AdminDashboard() {
               {verifiedProviders}
             </div>
             <div className="mt-1 text-xs text-zinc-500">
-              of {providers.length} registered
+              of {providerList.length} registered
             </div>
           </div>
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
@@ -92,7 +119,9 @@ export default function AdminDashboard() {
             <div className={`mt-2 text-3xl font-semibold ${accent.text}`}>
               {activeConsents}
             </div>
-            <div className="mt-1 text-xs text-zinc-500">incl. {activeEmergency} ER</div>
+            <div className="mt-1 text-xs text-zinc-500">
+              incl. {activeEmergency} ER
+            </div>
           </div>
         </div>
 
@@ -142,26 +171,33 @@ export default function AdminDashboard() {
               <li className="flex items-center justify-between">
                 <span className="text-zinc-400">Patients registered</span>
                 <span className="text-zinc-200">
-                  {patients.filter((p) => p.registered).length}
+                  {(patients ?? []).filter((p) => p.registered).length}
                 </span>
               </li>
             </ul>
           </Card>
 
           <Card title="System Audit Trail" subtitle="Latest security events">
-            <ul className="divide-y divide-zinc-800">
-              {auditLog.slice(0, 5).map((a) => (
-                <li key={a.id} className="py-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-xs text-zinc-300">{a.action}</span>
-                    <span className="shrink-0 text-[10px] text-zinc-600">
-                      {new Date(a.timestamp).toLocaleDateString()}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 text-[11px] text-zinc-500">{a.actorName}</div>
-                </li>
-              ))}
-            </ul>
+            {auditLoading && <CardGridSkeleton count={4} />}
+            {!auditLoading && (
+              <ul className="divide-y divide-zinc-800">
+                {(audit ?? []).slice(0, 5).map((a) => (
+                  <li key={a.id} className="py-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-xs text-zinc-300">
+                        {a.action}
+                      </span>
+                      <span className="shrink-0 text-[10px] text-zinc-600">
+                        {new Date(a.timestamp).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-zinc-500">
+                      {a.actorName}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
         </div>
       </div>

@@ -2,25 +2,47 @@
 
 import Link from "next/link";
 import { useAppSelector } from "@/store/hooks";
-import { auditLog } from "@/lib/dummy-data";
+import {
+  usePatients,
+  useProviders,
+  useConsents,
+  useRecords,
+  useEmergency,
+  useAudit,
+} from "@/hooks";
 import { roleAccent } from "@/lib/roles";
 import Card from "@/components/Card";
 import Badge from "@/components/Badge";
+import { QueryError, CardGridSkeleton } from "@/components/QueryState";
 
 export default function RegulatorDashboard() {
   const user = useAppSelector((s) => s.auth.user);
-  const patients = useAppSelector((s) => s.patients.list);
-  const providers = useAppSelector((s) => s.providers.list);
-  const consents = useAppSelector((s) => s.consents.list);
-  const records = useAppSelector((s) => s.records.list);
-  const emergency = useAppSelector((s) => s.emergency.list);
   const accent = user ? roleAccent[user.role] : roleAccent.regulator;
 
-  const verifiedProviders = providers.filter((p) => p.verified).length;
-  const unverifiedProviders = providers.filter((p) => !p.verified).length;
-  const activeConsents = consents.filter((c) => c.active).length;
-  const activeEmergency = emergency.filter((e) => e.active).length;
-  const activeRecords = records.filter((r) => !r.tombstoned).length;
+  const { data: patients } = usePatients({ enabled: !!user });
+  const { data: providers } = useProviders({ enabled: !!user });
+  const { data: consents } = useConsents({ enabled: !!user });
+  const { data: records } = useRecords({ enabled: !!user });
+  const { data: emergency } = useEmergency({ enabled: !!user });
+  const {
+    data: audit,
+    isLoading: auditLoading,
+    isError,
+    error,
+  } = useAudit({ enabled: !!user });
+
+  if (!user) return null;
+
+  const providerList = providers ?? [];
+  const consentList = consents ?? [];
+  const recordList = records ?? [];
+  const emergencyList = emergency ?? [];
+
+  const verifiedProviders = providerList.filter((p) => p.verified).length;
+  const unverifiedProviders = providerList.filter((p) => !p.verified).length;
+  const activeConsents = consentList.filter((c) => c.active).length;
+  const activeEmergency = emergencyList.filter((e) => e.active).length;
+  const activeRecords = recordList.filter((r) => !r.tombstoned).length;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -52,13 +74,14 @@ export default function RegulatorDashboard() {
       </div>
 
       <div className="flex-1 space-y-6 p-8">
+        {isError && <QueryError error={error} />}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
             <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
               Patients
             </div>
             <div className={`mt-2 text-3xl font-semibold ${accent.text}`}>
-              {patients.filter((p) => p.registered).length}
+              {(patients ?? []).filter((p) => p.registered).length}
             </div>
             <div className="mt-1 text-xs text-zinc-500">registered</div>
           </div>
@@ -68,7 +91,10 @@ export default function RegulatorDashboard() {
             </div>
             <div className={`mt-2 text-3xl font-semibold ${accent.text}`}>
               {verifiedProviders}
-              <span className="text-sm text-zinc-500"> / {providers.length}</span>
+              <span className="text-sm text-zinc-500">
+                {" "}
+                / {providerList.length}
+              </span>
             </div>
             <div className="mt-1 text-xs text-zinc-500">verified</div>
           </div>
@@ -104,12 +130,17 @@ export default function RegulatorDashboard() {
         <div className="grid gap-6 lg:grid-cols-2">
           <Card title="Provider Verification Queue" subtitle="Awaiting regulator decision">
             <ul className="divide-y divide-zinc-800">
-              {providers
+              {providerList
                 .filter((p) => !p.verified)
                 .map((p) => (
-                  <li key={p.address} className="flex items-center justify-between py-3">
+                  <li
+                    key={p.address}
+                    className="flex items-center justify-between py-3"
+                  >
                     <div>
-                      <div className="text-sm font-medium text-zinc-200">{p.name}</div>
+                      <div className="text-sm font-medium text-zinc-200">
+                        {p.name}
+                      </div>
                       <div className="text-xs text-zinc-500">
                         {p.specialty} · {p.hospital}
                       </div>
@@ -127,7 +158,7 @@ export default function RegulatorDashboard() {
 
           <Card title="Active Emergency Sessions" subtitle="Break-glass events requiring review">
             <ul className="divide-y divide-zinc-800">
-              {emergency
+              {emergencyList
                 .filter((e) => e.active)
                 .map((e, i) => (
                   <li key={i} className="py-3">
@@ -137,13 +168,15 @@ export default function RegulatorDashboard() {
                       </span>
                       <Badge tone="red">Active</Badge>
                     </div>
-                    <div className="mt-0.5 text-xs text-zinc-500">{e.justification}</div>
+                    <div className="mt-0.5 text-xs text-zinc-500">
+                      {e.justification}
+                    </div>
                     <div className="mt-0.5 text-[11px] text-zinc-600">
                       Valid until {new Date(e.validUntil).toLocaleString()}
                     </div>
                   </li>
                 ))}
-              {!emergency.some((e) => e.active) && (
+              {!emergencyList.some((e) => e.active) && (
                 <li className="py-6 text-center text-sm text-zinc-600">
                   No active emergency sessions.
                 </li>
@@ -153,24 +186,32 @@ export default function RegulatorDashboard() {
         </div>
 
         <Card title="Recent Network Activity" subtitle="Latest audit log entries">
-          <ul className="divide-y divide-zinc-800">
-            {auditLog.slice(0, 6).map((a) => (
-              <li key={a.id} className="flex items-center justify-between py-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-medium text-zinc-200">{a.action}</span>
-                    <Badge tone="zinc">{a.actorRole}</Badge>
+          {auditLoading && <CardGridSkeleton count={4} />}
+          {!auditLoading && (
+            <ul className="divide-y divide-zinc-800">
+              {(audit ?? []).slice(0, 6).map((a) => (
+                <li
+                  key={a.id}
+                  className="flex items-center justify-between py-3"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium text-zinc-200">
+                        {a.action}
+                      </span>
+                      <Badge tone="zinc">{a.actorRole}</Badge>
+                    </div>
+                    <div className="mt-0.5 text-xs text-zinc-500">
+                      {a.actorName} → {a.target}
+                    </div>
                   </div>
-                  <div className="mt-0.5 text-xs text-zinc-500">
-                    {a.actorName} → {a.target}
-                  </div>
-                </div>
-                <span className="shrink-0 text-xs text-zinc-600">
-                  {new Date(a.timestamp).toLocaleString()}
-                </span>
-              </li>
-            ))}
-          </ul>
+                  <span className="shrink-0 text-xs text-zinc-600">
+                    {new Date(a.timestamp).toLocaleString()}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       </div>
     </div>

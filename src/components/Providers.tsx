@@ -1,51 +1,117 @@
 "use client";
 
 import { useState } from "react";
-import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { verifyProvider, registerProvider } from "@/store/slices/providersSlice";
-import { canViewProviders, visibleProviders } from "@/lib/access";
-import { providerProfiles } from "@/lib/dummy-data";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAppSelector } from "@/store/hooks";
+import { api } from "@/lib/api";
+import { queryKeys, useProviders } from "@/hooks";
+import { canViewProviders } from "@/lib/access";
+import {
+  chainRegisterProvider,
+  chainVerifyProvider,
+  ChainNotWiredError,
+} from "@/lib/chain";
+import type { ProviderListItem } from "@/lib/api";
 import Card from "@/components/Card";
 import Badge from "@/components/Badge";
 import PageHeader from "@/components/PageHeader";
 import AccessDenied from "@/components/AccessDenied";
+import { QueryError, CardGridSkeleton, InlineNotice } from "@/components/QueryState";
 
 export default function Providers() {
-  const dispatch = useAppDispatch();
+  const queryClient = useQueryClient();
   const user = useAppSelector((s) => s.auth.user);
-  const providers = useAppSelector((s) => s.providers.list);
-  const consents = useAppSelector((s) => s.consents.list);
+  const canView = !!user && canViewProviders(user.role);
 
   const [address, setAddress] = useState("");
   const [name, setName] = useState("");
   const [didURI, setDidURI] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState<string | null>(null);
+
+  const {
+    data: providers,
+    isLoading,
+    isError,
+    error,
+  } = useProviders({ enabled: canView });
 
   if (!user) return null;
   if (!canViewProviders(user.role) && user.role !== "patient") {
-    return <AccessDenied description="Only regulators and administrators can manage providers." />;
+    return (
+      <AccessDenied description="Only regulators and administrators can manage providers." />
+    );
   }
 
   const canManage = user.role === "regulator" || user.role === "admin";
-  const list = visibleProviders(user.role, user, providers, consents);
+  const list = providers ?? [];
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!address || !name || !didURI) return;
-    dispatch(registerProvider({ address, name, didURI }));
-    setAddress("");
-    setName("");
-    setDidURI("");
+    setSubmitting(true);
+    setNotice(null);
+    setFormError(null);
+    try {
+      await api.providers.register({ address, name, didURI });
+      try {
+        await chainRegisterProvider({ address, name, didURI });
+      } catch (err) {
+        if (err instanceof ChainNotWiredError) {
+          setNotice(
+            "Chain write not wired (wagmi) — DB updated, on-chain registration pending.",
+          );
+        } else {
+          throw err;
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.providers });
+      setAddress("");
+      setName("");
+      setDidURI("");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Registration failed");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const toggleVerify = (addr: string, currentlyVerified: boolean, erQualified: boolean) => {
-    if (!canManage) return;
-    dispatch(
-      verifyProvider({
-        address: addr,
+  const toggleVerify = async (
+    p: ProviderListItem,
+    currentlyVerified: boolean,
+  ) => {
+    if (!canManage || !p) return;
+    setVerifying(p.address);
+    setNotice(null);
+    try {
+      await api.providers.verify({
+        address: p.address,
         isVerified: !currentlyVerified,
-        erQualified,
-      }),
-    );
+        erQualified: currentlyVerified ? p.erQualified : false,
+      });
+      try {
+        await chainVerifyProvider({
+          address: p.address,
+          isVerified: !currentlyVerified,
+          erQualified: currentlyVerified ? p.erQualified : false,
+        });
+      } catch (err) {
+        if (err instanceof ChainNotWiredError) {
+          setNotice(
+            "Chain write not wired (wagmi) — DB updated, on-chain verification pending.",
+          );
+        } else {
+          throw err;
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.providers });
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Verification failed");
+    } finally {
+      setVerifying(null);
+    }
   };
 
   return (
@@ -85,18 +151,22 @@ export default function Providers() {
               />
               <button
                 type="submit"
-                className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400"
+                disabled={submitting}
+                className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
               >
-                Register
+                {submitting ? "Registering…" : "Register"}
               </button>
             </form>
+            {formError && <QueryError error={new Error(formError)} />}
+            {notice && <InlineNotice>{notice}</InlineNotice>}
           </Card>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          {list.map((p) => {
-            const profile = providerProfiles.find((x) => x.address === p.address);
-            return (
+        {isLoading && <CardGridSkeleton count={4} />}
+        {isError && <QueryError error={error} />}
+        {!isLoading && !isError && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {list.map((p) => (
               <div
                 key={p.address}
                 className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5"
@@ -105,7 +175,7 @@ export default function Providers() {
                   <div>
                     <div className="text-sm font-semibold text-white">{p.name}</div>
                     <div className="mt-0.5 text-xs text-zinc-500">
-                      {profile?.specialty} · {profile?.licenseNumber}
+                      {p.specialty} · {p.licenseNumber}
                     </div>
                     <div className="mt-0.5 text-xs text-zinc-500">{p.hospital}</div>
                   </div>
@@ -124,21 +194,24 @@ export default function Providers() {
                   </code>
                   {canManage && (
                     <button
-                      onClick={() =>
-                        toggleVerify(p.address, p.verified, p.erQualified)
-                      }
-                      className="shrink-0 rounded-md border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:border-emerald-500 hover:text-emerald-400"
+                      onClick={() => toggleVerify(p, p.verified)}
+                      disabled={verifying === p.address}
+                      className="shrink-0 rounded-md border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:border-emerald-500 hover:text-emerald-400 disabled:opacity-50"
                     >
-                      {p.verified ? "Unverify" : "Verify"}
+                      {verifying === p.address
+                        ? "Saving…"
+                        : p.verified
+                          ? "Unverify"
+                          : "Verify"}
                     </button>
                   )}
                 </div>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
 
-        {list.length === 0 && (
+        {!isLoading && !isError && list.length === 0 && (
           <div className="rounded-lg border border-dashed border-zinc-800 p-10 text-center text-sm text-zinc-600">
             No providers visible to you.
           </div>

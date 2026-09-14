@@ -10,7 +10,7 @@ export default function AppShell({
 }) {
   const pathname = usePathname();
 
-  if (pathname === "/login") return <>{children}</>;
+  if (pathname === "/login" || pathname === "/register") return <>{children}</>;
 
   return (
     <div className="flex min-h-screen bg-zinc-950 text-zinc-100">

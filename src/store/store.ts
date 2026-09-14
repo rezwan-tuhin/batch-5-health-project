@@ -1,19 +1,16 @@
 import { configureStore } from "@reduxjs/toolkit";
-import patientsReducer from "./slices/patientsSlice";
-import providersReducer from "./slices/providersSlice";
-import consentsReducer from "./slices/consentsSlice";
-import recordsReducer from "./slices/recordsSlice";
-import emergencyReducer from "./slices/emergencySlice";
 import authReducer from "./slices/authSlice";
+import uiReducer from "./slices/uiSlice";
 
+// NOTE: Redux holds ONLY session + UI state. Business data (patients,
+// providers, consents, records, emergency, audit, profiles) lives in the
+// database behind the Next.js API routes (`src/lib/api.ts`) and is fetched with
+// react-query. On-chain truth (registrations, consents, record anchors,
+// emergency) is written via the wagmi seam in `src/lib/chain.ts`.
 export const store = configureStore({
   reducer: {
-    patients: patientsReducer,
-    providers: providersReducer,
-    consents: consentsReducer,
-    records: recordsReducer,
-    emergency: emergencyReducer,
     auth: authReducer,
+    ui: uiReducer,
   },
 });
 

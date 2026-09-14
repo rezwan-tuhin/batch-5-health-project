@@ -2,24 +2,34 @@
 
 import Link from "next/link";
 import { useAppSelector } from "@/store/hooks";
-import { patientProfiles } from "@/lib/dummy-data";
+import { useEmergency, useRecords, usePatients } from "@/hooks";
 import { roleAccent } from "@/lib/roles";
 import Card from "@/components/Card";
 import Badge from "@/components/Badge";
+import { QueryError, CardGridSkeleton } from "@/components/QueryState";
 
 export default function ERDashboard() {
   const user = useAppSelector((s) => s.auth.user);
-  const emergency = useAppSelector((s) => s.emergency.list);
-  const records = useAppSelector((s) => s.records.list);
-  const patients = useAppSelector((s) => s.patients.list);
   const accent = user ? roleAccent[user.role] : roleAccent.er_specialist;
 
-  const activeSessions = emergency.filter((e) => e.active);
+  const {
+    data: emergency,
+    isLoading: emergencyLoading,
+    isError,
+    error,
+  } = useEmergency({ enabled: !!user });
+  const { data: records } = useRecords({ enabled: !!user });
+  const { data: patients } = usePatients({ enabled: !!user });
+
+  if (!user) return null;
+
+  const sessions = emergency ?? [];
+  const activeSessions = sessions.filter((e) => e.active);
   const myActive = activeSessions.filter(
-    (e) => e.doctorAddress === user?.address,
+    (e) => e.doctorAddress === user.address,
   );
   const admittedPatientAddrs = activeSessions.map((e) => e.patientAddress);
-  const admittedRecords = records.filter(
+  const admittedRecords = (records ?? []).filter(
     (r) => admittedPatientAddrs.includes(r.patientAddress) && !r.tombstoned,
   );
 
@@ -28,7 +38,9 @@ export default function ERDashboard() {
       <div className="border-b border-zinc-800 px-8 py-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl font-semibold text-white">Emergency Department</h1>
+            <h1 className="text-xl font-semibold text-white">
+              Emergency Department
+            </h1>
             <p className="mt-1 text-sm text-zinc-400">
               Break-glass access · Life-threatening situations only
             </p>
@@ -45,6 +57,7 @@ export default function ERDashboard() {
       </div>
 
       <div className="flex-1 space-y-6 p-8">
+        {isError && <QueryError error={error} />}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-5">
             <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-red-300">
@@ -52,7 +65,7 @@ export default function ERDashboard() {
               Active Sessions
             </div>
             <div className={`mt-2 text-3xl font-semibold ${accent.text}`}>
-              {activeSessions.length}
+              {emergencyLoading ? "…" : activeSessions.length}
             </div>
             <div className="mt-1 text-xs text-zinc-500">network-wide</div>
           </div>
@@ -61,7 +74,7 @@ export default function ERDashboard() {
               Your Sessions
             </div>
             <div className={`mt-2 text-3xl font-semibold ${accent.text}`}>
-              {myActive.length}
+              {emergencyLoading ? "…" : myActive.length}
             </div>
             <div className="mt-1 text-xs text-zinc-500">initiated by you</div>
           </div>
@@ -78,41 +91,48 @@ export default function ERDashboard() {
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Card title="Active Emergency Sessions" subtitle="Break-glass events in progress">
-            <ul className="divide-y divide-zinc-800">
-              {activeSessions.map((e, i) => {
-                const patient = patientProfiles.find(
-                  (p) => p.address === e.patientAddress,
-                );
-                return (
-                  <li key={i} className="rounded-md border border-red-500/20 bg-red-500/5 px-4 py-3">
+            {emergencyLoading && <CardGridSkeleton count={3} />}
+            {!emergencyLoading && (
+              <ul className="divide-y divide-zinc-800">
+                {activeSessions.map((e, i) => (
+                  <li
+                    key={i}
+                    className="rounded-md border border-red-500/20 bg-red-500/5 px-4 py-3"
+                  >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-semibold text-white">
-                        {patient?.name ?? e.patientAddress}
+                        {e.patientName ?? e.patientAddress}
                       </span>
                       <Badge tone="red">Break-glass</Badge>
                     </div>
                     <div className="mt-1 text-xs text-zinc-400">
-                      Attending: <span className="text-zinc-200">{e.doctorName}</span>
+                      Attending:{" "}
+                      <span className="text-zinc-200">{e.doctorName}</span>
                     </div>
-                    <div className="mt-1 text-xs text-zinc-500">{e.justification}</div>
+                    <div className="mt-1 text-xs text-zinc-500">
+                      {e.justification}
+                    </div>
                     <div className="mt-1 text-[11px] font-mono text-red-300">
                       expires {new Date(e.validUntil).toLocaleString()}
                     </div>
                   </li>
-                );
-              })}
-              {activeSessions.length === 0 && (
-                <li className="py-6 text-center text-sm text-zinc-600">
-                  No active emergency sessions.
-                </li>
-              )}
-            </ul>
+                ))}
+                {activeSessions.length === 0 && (
+                  <li className="py-6 text-center text-sm text-zinc-600">
+                    No active emergency sessions.
+                  </li>
+                )}
+              </ul>
+            )}
           </Card>
 
           <Card title="Admitted Patient Records" subtitle="Visible through active sessions">
             <ul className="divide-y divide-zinc-800">
               {admittedRecords.slice(0, 6).map((r) => (
-                <li key={r.recordId} className="flex items-center justify-between py-3">
+                <li
+                  key={r.recordId}
+                  className="flex items-center justify-between py-3"
+                >
                   <div>
                     <div className="text-sm text-zinc-200">{r.title}</div>
                     <div className="text-xs text-zinc-500">
@@ -136,12 +156,14 @@ export default function ERDashboard() {
           </Card>
         </div>
 
-        <Card title="Registered Patients — Quick Lookup" subtitle="All on-chain patient identities">
+        <Card
+          title="Registered Patients — Quick Lookup"
+          subtitle="All on-chain patient identities"
+        >
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {patients
+            {(patients ?? [])
               .filter((p) => p.registered)
               .map((p) => {
-                const profile = patientProfiles.find((x) => x.address === p.address);
                 const hasActive = activeSessions.some(
                   (e) => e.patientAddress === p.address,
                 );
@@ -152,7 +174,7 @@ export default function ERDashboard() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-zinc-200">
-                        {profile?.name ?? p.address}
+                        {p.name ?? p.address}
                       </span>
                       {hasActive ? (
                         <Badge tone="red">Active ER</Badge>
@@ -161,7 +183,7 @@ export default function ERDashboard() {
                       )}
                     </div>
                     <div className="mt-1 text-xs text-zinc-500">
-                      Blood {profile?.bloodType ?? "—"} · {profile?.dob ?? "—"}
+                      Blood {p.bloodType ?? "—"} · {p.dob ?? "—"}
                     </div>
                   </div>
                 );

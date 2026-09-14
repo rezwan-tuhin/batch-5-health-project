@@ -5,6 +5,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { logout } from "@/store/slices/authSlice";
+import { shortWalletAddress } from "@/lib/format";
+import { useDisconnect } from "wagmi";
 import type { Role } from "@/lib/dummy-data";
 
 interface NavItem {
@@ -92,22 +94,27 @@ export default function Navbar() {
   const router = useRouter();
   const dispatch = useAppDispatch();
   const user = useAppSelector((s) => s.auth.user);
-  const wallet = useAppSelector((s) => s.auth.wallet);
+  const address = useAppSelector((s) => s.auth.address);
+  const isWalletConnected = useAppSelector((s) => s.auth.isWalletConnected);
+  const pendingTx = useAppSelector((s) => s.ui.pendingTx);
+  const { disconnect } = useDisconnect();
   const [copied, setCopied] = useState(false);
 
   if (!user) return null;
 
   const navItems = navByRole[user.role];
   const config = roleConfig[user.role];
+  const wallet = isWalletConnected && address ? address : null;
 
   const handleLogout = () => {
+    disconnect();
     dispatch(logout());
     router.push("/login");
   };
 
   const handleCopy = () => {
     if (!wallet) return;
-    navigator.clipboard?.writeText(wallet.address).catch(() => {});
+    navigator.clipboard?.writeText(wallet).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -171,6 +178,12 @@ export default function Navbar() {
               {config.label}
             </div>
           </div>
+          {pendingTx && (
+            <span
+              title="Transaction pending"
+              className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-amber-400 border-t-transparent"
+            />
+          )}
         </div>
 
         {wallet && (
@@ -178,9 +191,9 @@ export default function Navbar() {
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
             <div className="min-w-0 flex-1 text-xs">
               <div className="truncate font-mono text-emerald-300">
-                {wallet.address}
+                {shortWalletAddress(wallet)}
               </div>
-              <div className="capitalize text-zinc-500">{wallet.provider}</div>
+              <div className="text-zinc-500">wallet connected</div>
             </div>
             <button
               onClick={handleCopy}

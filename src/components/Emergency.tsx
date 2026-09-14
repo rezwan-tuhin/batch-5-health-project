@@ -1,64 +1,125 @@
 "use client";
 
 import { useState } from "react";
-import { useAppDispatch, useAppSelector } from "@/store/hooks";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAppSelector } from "@/store/hooks";
+import { api } from "@/lib/api";
+import { queryKeys, useEmergency, usePatients, useProviders } from "@/hooks";
+import { canViewEmergency } from "@/lib/access";
 import {
-  triggerEmergencyAccess,
-  expireSession,
-} from "@/store/slices/emergencySlice";
-import { canViewEmergency, visibleEmergency } from "@/lib/access";
-import { patientProfiles } from "@/lib/dummy-data";
+  chainTriggerEmergencyAccess,
+  chainExpireEmergencyAccess,
+  ChainNotWiredError,
+} from "@/lib/chain";
+import type { EmergencyListItem } from "@/lib/api";
+import { hoursFromNowIso, hoursFromNowUnix } from "@/lib/time";
 import Card from "@/components/Card";
 import Badge from "@/components/Badge";
 import PageHeader from "@/components/PageHeader";
 import AccessDenied from "@/components/AccessDenied";
+import { QueryError, InlineNotice } from "@/components/QueryState";
 
 export default function Emergency() {
-  const dispatch = useAppDispatch();
+  const queryClient = useQueryClient();
   const user = useAppSelector((s) => s.auth.user);
-  const sessions = useAppSelector((s) => s.emergency.list);
-  const patients = useAppSelector((s) => s.patients.list);
-  const erDoctors = useAppSelector((s) =>
-    s.providers.list.filter((p) => p.verified && p.erQualified),
-  );
+  const canView = !!user && canViewEmergency(user.role);
 
   const [patient, setPatient] = useState("");
   const [doctor, setDoctor] = useState("");
   const [justification, setJustification] = useState("");
   const [hours, setHours] = useState("4");
+  const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const {
+    data: sessions,
+    isLoading,
+    isError,
+    error,
+  } = useEmergency({ enabled: canView });
+  const { data: patients } = usePatients({ enabled: canView });
+  const { data: providers } = useProviders({ enabled: canView });
+
+  const erDoctors = (providers ?? []).filter((p) => p.verified && p.erQualified);
 
   if (!user) return null;
   if (!canViewEmergency(user.role)) {
-    return <AccessDenied description="Only ER specialists, regulators and admins can manage emergency access." />;
+    return (
+      <AccessDenied description="Only ER specialists, regulators and admins can manage emergency access." />
+    );
   }
 
   const isER = user.role === "er_specialist";
-  const list = visibleEmergency(user.role, sessions);
+  const list: EmergencyListItem[] = sessions ?? [];
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!patient || !doctor || !justification) return;
     const doc = erDoctors.find((d) => d.address === doctor);
-    const validUntil = new Date(
-      Date.now() + Number(hours || 0) * 3600 * 1000,
-    ).toISOString();
-    dispatch(
-      triggerEmergencyAccess({
+    const validUntil = hoursFromNowIso(Number(hours || 0));
+    setSubmitting(true);
+    setNotice(null);
+    setFormError(null);
+    try {
+      await api.emergency.trigger({
         patientAddress: patient,
         doctorAddress: doctor,
         doctorName: doc?.name ?? doctor,
         justification,
         validUntil,
-      }),
-    );
-    setPatient("");
-    setDoctor("");
-    setJustification("");
-    setHours("4");
+        hours: Number(hours || 0),
+      });
+      try {
+        await chainTriggerEmergencyAccess({
+          patientAddress: patient,
+          doctorAddress: doctor,
+          justification,
+          validUntil: hoursFromNowUnix(Number(hours || 0)),
+        });
+      } catch (err) {
+        if (err instanceof ChainNotWiredError) {
+          setNotice(
+            "Chain write not wired (wagmi) — DB updated, on-chain session pending.",
+          );
+        } else {
+          throw err;
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.emergency });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.records });
+      setPatient("");
+      setDoctor("");
+      setJustification("");
+      setHours("4");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Failed to trigger access");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const expire = (p: string) => {
-    dispatch(expireSession(p));
+  const expire = async (c: EmergencyListItem) => {
+    setNotice(null);
+    setFormError(null);
+    try {
+      await api.emergency.expire({ patientAddress: c.patientAddress });
+      try {
+        await chainExpireEmergencyAccess({ patientAddress: c.patientAddress });
+      } catch (err) {
+        if (err instanceof ChainNotWiredError) {
+          setNotice(
+            "Chain write not wired (wagmi) — DB updated, on-chain expiry pending.",
+          );
+        } else {
+          throw err;
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.emergency });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.records });
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Failed to expire session");
+    }
   };
 
   return (
@@ -81,12 +142,11 @@ export default function Emergency() {
                 className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-amber-500"
               >
                 <option value="">Patient…</option>
-                {patients
+                {(patients ?? [])
                   .filter((p) => p.registered)
                   .map((p) => (
                     <option key={p.address} value={p.address}>
-                      {patientProfiles.find((x) => x.address === p.address)?.name ??
-                        p.address}
+                      {p.name ?? p.address}
                     </option>
                   ))}
               </select>
@@ -119,83 +179,100 @@ export default function Emergency() {
               <button
                 type="submit"
                 onClick={submit}
-                className="rounded-md bg-red-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-red-400"
+                disabled={submitting}
+                className="rounded-md bg-red-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-red-400 disabled:opacity-50"
               >
-                Trigger
+                {submitting ? "Triggering…" : "Trigger"}
               </button>
             </form>
+            {formError && <QueryError error={new Error(formError)} />}
+            {notice && <InlineNotice>{notice}</InlineNotice>}
           </Card>
         )}
 
         {!isER && (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-5 py-3 text-sm text-red-200">
-            {user?.role === "regulator" || user?.role === "admin"
+          <InlineNotice tone="red">
+            {user.role === "regulator" || user.role === "admin"
               ? "Regulator oversight — monitoring active break-glass sessions."
               : "Emergency sessions visible to authorized oversight roles only."}
-          </div>
+          </InlineNotice>
         )}
 
         <Card
           title="Emergency Sessions"
           subtitle={`${list.filter((s) => s.active).length} active · all access is audited`}
         >
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wide text-zinc-500">
-                  <th className="pb-2 pr-4">Patient</th>
-                  <th className="pb-2 pr-4">ER Specialist</th>
-                  <th className="pb-2 pr-4">Justification</th>
-                  <th className="pb-2 pr-4">Valid Until</th>
-                  <th className="pb-2 pr-4">Status</th>
-                  <th className="pb-2">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800">
-                {list.map((s, i) => (
-                  <tr
-                    key={i}
-                    className={s.active ? "bg-red-500/5" : undefined}
-                  >
-                    <td className="py-3 pr-4 text-zinc-300">
-                      {patientProfiles.find((p) => p.address === s.patientAddress)
-                        ?.name ?? s.patientAddress}
-                      <div className="mt-0.5 font-mono text-[11px] text-zinc-600">
-                        {s.patientAddress}
-                      </div>
-                    </td>
-                    <td className="py-3 pr-4 text-zinc-200">{s.doctorName}</td>
-                    <td className="py-3 pr-4 text-zinc-300">{s.justification}</td>
-                    <td className="py-3 pr-4 text-xs text-zinc-400">
-                      {new Date(s.validUntil).toLocaleString()}
-                    </td>
-                    <td className="py-3 pr-4">
-                      {s.active ? (
-                        <Badge tone="red">
-                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-400" />
-                          Active
-                        </Badge>
-                      ) : (
-                        <Badge tone="zinc">Expired</Badge>
-                      )}
-                    </td>
-                    <td className="py-3">
-                      {s.active && (isER || user?.role === "admin") ? (
-                        <button
-                          onClick={() => expire(s.patientAddress)}
-                          className="rounded-md border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:border-red-500 hover:text-red-400"
-                        >
-                          Expire
-                        </button>
-                      ) : (
-                        <span className="text-xs text-zinc-600">—</span>
-                      )}
-                    </td>
+          {isLoading && (
+            <div className="animate-pulse space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-10 rounded bg-zinc-800/60" />
+              ))}
+            </div>
+          )}
+          {isError && <QueryError error={error} />}
+          {!isLoading && !isError && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wide text-zinc-500">
+                    <th className="pb-2 pr-4">Patient</th>
+                    <th className="pb-2 pr-4">ER Specialist</th>
+                    <th className="pb-2 pr-4">Justification</th>
+                    <th className="pb-2 pr-4">Valid Until</th>
+                    <th className="pb-2 pr-4">Status</th>
+                    <th className="pb-2">Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-zinc-800">
+                  {list.map((s, i) => (
+                    <tr
+                      key={i}
+                      className={s.active ? "bg-red-500/5" : undefined}
+                    >
+                      <td className="py-3 pr-4 text-zinc-300">
+                        {s.patientName ?? s.patientAddress}
+                        <div className="mt-0.5 font-mono text-[11px] text-zinc-600">
+                          {s.patientAddress}
+                        </div>
+                      </td>
+                      <td className="py-3 pr-4 text-zinc-200">{s.doctorName}</td>
+                      <td className="py-3 pr-4 text-zinc-300">{s.justification}</td>
+                      <td className="py-3 pr-4 text-xs text-zinc-400">
+                        {new Date(s.validUntil).toLocaleString()}
+                      </td>
+                      <td className="py-3 pr-4">
+                        {s.active ? (
+                          <Badge tone="red">
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-400" />
+                            Active
+                          </Badge>
+                        ) : (
+                          <Badge tone="zinc">Expired</Badge>
+                        )}
+                      </td>
+                      <td className="py-3">
+                        {s.active && (isER || user.role === "admin") ? (
+                          <button
+                            onClick={() => expire(s)}
+                            className="rounded-md border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:border-red-500 hover:text-red-400"
+                          >
+                            Expire
+                          </button>
+                        ) : (
+                          <span className="text-xs text-zinc-600">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!isLoading && !isError && list.length === 0 && (
+            <p className="py-4 text-center text-sm text-zinc-600">
+              No emergency sessions.
+            </p>
+          )}
         </Card>
       </div>
     </div>

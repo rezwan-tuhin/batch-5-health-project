@@ -1,14 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import {
-  connectWallet,
-  loginAs,
-  disconnectWallet,
-  type WalletProvider,
-} from "@/store/slices/authSlice";
+import { setSession } from "@/store/slices/authSlice";
+import { demoUserForRole } from "@/lib/demo";
 import type { Role } from "@/lib/dummy-data";
 
 interface RoleOption {
@@ -63,52 +61,23 @@ const roleOptions: RoleOption[] = [
   },
 ];
 
-const walletProviders: {
-  id: WalletProvider;
-  name: string;
-  desc: string;
-  color: string;
-}[] = [
-  {
-    id: "metamask",
-    name: "MetaMask",
-    desc: "Browser extension wallet",
-    color: "text-orange-400",
-  },
-  {
-    id: "walletconnect",
-    name: "WalletConnect",
-    desc: "Scan with mobile wallet",
-    color: "text-sky-400",
-  },
-  {
-    id: "coinbase",
-    name: "Coinbase Wallet",
-    desc: "Wallet + browser extension",
-    color: "text-blue-400",
-  },
-];
-
 export default function Login() {
   const dispatch = useAppDispatch();
   const router = useRouter();
-  const wallet = useAppSelector((s) => s.auth.wallet);
+  const auth = useAppSelector((s) => s.auth);
 
-  const [showConnect, setShowConnect] = useState(false);
-  const [connecting, setConnecting] = useState<WalletProvider | null>(null);
-
-  const handleConnect = (provider: WalletProvider) => {
-    setConnecting(provider);
-    setTimeout(() => {
-      dispatch(connectWallet(provider));
-      setConnecting(null);
-      setShowConnect(false);
-    }, 700);
-  };
+  useEffect(() => {
+    if (auth.isAuthenticated && auth.user && window.location.pathname === "/login") {
+      router.replace("/");
+    }
+  }, [auth.isAuthenticated, auth.user, router]);
 
   const handleLogin = (role: Role) => {
-    dispatch(loginAs(role));
-    router.push("/");
+    const demo = demoUserForRole(role);
+    if (demo) {
+      dispatch(setSession({ user: demo, role }));
+      router.push("/");
+    }
   };
 
   return (
@@ -143,62 +112,25 @@ export default function Login() {
           Sign in to your workspace
         </h1>
         <p className="mt-2 text-center text-sm text-zinc-400">
-          Connect a wallet and select your role to preview the platform. This is
-          a demo — no real signatures required.
+          Connect a wallet and select your role to preview the platform.
         </p>
 
-        <div className="mx-auto mt-8 max-w-md">
-          {wallet ? (
-            <div className="flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-4">
-              <div className="flex items-center gap-3">
-                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-400" />
-                <div>
-                  <div className="font-mono text-sm text-emerald-300">
-                    {wallet.address}
-                  </div>
-                  <div className="text-xs capitalize text-zinc-500">
-                    {wallet.provider} · connected
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={() => dispatch(disconnectWallet())}
-                className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:border-red-500/50 hover:text-red-400"
-              >
-                Disconnect
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setShowConnect(true)}
-              disabled={connecting !== null}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900/60 px-5 py-4 text-sm font-medium text-white transition-colors hover:border-emerald-500/50 hover:bg-zinc-900 disabled:opacity-60"
-            >
-              {connecting ? (
-                <>
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
-                  Connecting to {connecting}…
-                </>
-              ) : (
-                <>
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    className="h-5 w-5 text-emerald-400"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M12 6v12m6-6H6"
-                    />
-                  </svg>
-                  Connect Wallet
-                </>
-              )}
-            </button>
-          )}
+        {auth.status === "error" && auth.unknownWallet && (
+          <div className="mx-auto mt-6 max-w-md rounded-lg border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-center text-xs text-sky-200">
+            This wallet has no account registered yet.{" "}
+            <Link href="/register" className="font-medium underline hover:text-sky-100">
+              Register now →
+            </Link>
+          </div>
+        )}
+        {auth.status === "error" && !auth.unknownWallet && (
+          <div className="mx-auto mt-6 max-w-md rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-center text-xs text-amber-200">
+            Identity service unreachable ({auth.error}).
+          </div>
+        )}
+
+        <div className="mt-8 flex justify-center">
+          <WalletConnectButton />
         </div>
 
         <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -222,62 +154,28 @@ export default function Login() {
           ))}
 
           <div className="flex flex-col justify-between rounded-xl border border-dashed border-zinc-800 bg-transparent p-5">
-            <div className="text-2xl text-zinc-700">?</div>
+            <div className="text-2xl text-sky-700">✚</div>
             <div className="mt-3 text-sm font-semibold text-zinc-400">
               New here?
             </div>
             <div className="mt-1 text-xs leading-relaxed text-zinc-600">
-              In production, users authenticate via RainbowKit + a wallet
-              signature and are mapped to their on-chain role.
+              Create a patient or provider account with your wallet and set up
+              your profile.
             </div>
+            <Link
+              href="/register"
+              className="mt-4 rounded-md border border-sky-500/40 px-3 py-1.5 text-center text-xs font-medium text-sky-300 transition-colors hover:bg-sky-500/10"
+            >
+              Register →
+            </Link>
           </div>
         </div>
 
         <div className="mt-8 text-center text-xs text-zinc-600">
-          Demo interface · Wallet connection and data are simulated for
-          illustrative purposes
+          Wallet connected via RainbowKit · Backend, contract writes and IPFS
+          are still simulated
         </div>
       </div>
-
-      {showConnect && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-          onClick={() => setShowConnect(false)}
-        >
-          <div
-            className="w-full max-w-sm rounded-xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-white">Connect a wallet</h3>
-              <button
-                onClick={() => setShowConnect(false)}
-                className="rounded-md border border-zinc-800 px-2 py-0.5 text-sm text-zinc-500 hover:border-zinc-600 hover:text-zinc-200"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="space-y-2">
-              {walletProviders.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => handleConnect(p.id)}
-                  className="flex w-full items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-3 text-left transition-colors hover:border-zinc-600 hover:bg-zinc-900"
-                >
-                  <div>
-                    <div className={`text-sm font-medium ${p.color}`}>{p.name}</div>
-                    <div className="mt-0.5 text-xs text-zinc-500">{p.desc}</div>
-                  </div>
-                  <span className="text-zinc-500">→</span>
-                </button>
-              ))}
-            </div>
-            <p className="mt-4 text-center text-[11px] text-zinc-600">
-              Simulated wallet — no real signature happens in this demo.
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

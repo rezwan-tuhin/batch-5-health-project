@@ -1,27 +1,36 @@
 "use client";
 
 import { useState } from "react";
-import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { registerPatientAsync } from "@/store/slices/patientsSlice";
-import {
-  canViewPatients,
-  visiblePatients,
-} from "@/lib/access";
-import { patientProfiles } from "@/lib/dummy-data";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAppSelector } from "@/store/hooks";
+import { api } from "@/lib/api";
+import { queryKeys, usePatients } from "@/hooks";
+import { canViewPatients } from "@/lib/access";
+import { chainRegisterPatient, ChainNotWiredError } from "@/lib/chain";
+import type { PatientListItem } from "@/lib/api";
 import Card from "@/components/Card";
 import Badge from "@/components/Badge";
 import PageHeader from "@/components/PageHeader";
 import AccessDenied from "@/components/AccessDenied";
+import { QueryError, CardGridSkeleton, InlineNotice } from "@/components/QueryState";
 
 export default function Patients() {
-  const dispatch = useAppDispatch();
+  const queryClient = useQueryClient();
   const user = useAppSelector((s) => s.auth.user);
-  const patients = useAppSelector((s) => s.patients.list);
-  const consents = useAppSelector((s) => s.consents.list);
-  const registering = useAppSelector((s) => s.patients.registering);
+  const canView = !!user && canViewPatients(user.role);
 
   const [address, setAddress] = useState("");
   const [didURI, setDidURI] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const {
+    data: patients,
+    isLoading,
+    isError,
+    error,
+  } = usePatients({ enabled: canView });
 
   if (!user) return null;
   if (!canViewPatients(user.role)) {
@@ -33,33 +42,54 @@ export default function Patients() {
     );
   }
 
-  const isFullAccess = user.role === "regulator" || user.role === "admin";
-  const list = visiblePatients(user.role, user, patients, consents);
+  const canManage = user.role === "regulator" || user.role === "admin";
+  const list: PatientListItem[] = patients ?? [];
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!address || !didURI) return;
-    dispatch(registerPatientAsync({ address, didURI }));
-    setAddress("");
-    setDidURI("");
+    setSubmitting(true);
+    setNotice(null);
+    setFormError(null);
+    try {
+      await api.patients.register({ address, didURI });
+      try {
+        await chainRegisterPatient({ address, didURI });
+      } catch (err) {
+        if (err instanceof ChainNotWiredError) {
+          setNotice(
+            "Chain write not wired (wagmi) — DB updated, on-chain registration pending.",
+          );
+        } else {
+          throw err;
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.patients });
+      setAddress("");
+      setDidURI("");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Registration failed");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <div className="flex flex-1 flex-col">
       <PageHeader
-        title={isFullAccess ? "Patients" : "My Patients"}
+        title={canManage ? "Patients" : "My Patients"}
         description={
-          isFullAccess
+          canManage
             ? "Registered patient identities with decentralized DIDs"
             : "Patients who have granted you consent to access their records"
         }
       />
 
       <div className="flex-1 space-y-6 p-8">
-        {isFullAccess && (
+        {canManage && (
           <Card
             title="Register Patient"
-            subtitle="Self-registration (whenNotPaused)"
+            subtitle="Self-registration (whenNotPaused) — writes to DB + contract"
           >
             <form
               onSubmit={submit}
@@ -79,19 +109,22 @@ export default function Patients() {
               />
               <button
                 type="submit"
-                disabled={registering}
+                disabled={submitting}
                 className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-emerald-400 disabled:opacity-50"
               >
-                {registering ? "Registering…" : "Register"}
+                {submitting ? "Registering…" : "Register"}
               </button>
             </form>
+            {formError && <QueryError error={new Error(formError)} />}
+            {notice && <InlineNotice>{notice}</InlineNotice>}
           </Card>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {list.map((p) => {
-            const profile = patientProfiles.find((x) => x.address === p.address);
-            return (
+        {isLoading && <CardGridSkeleton count={6} />}
+        {isError && <QueryError error={error} />}
+        {!isLoading && !isError && (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {list.map((p) => (
               <div
                 key={p.address}
                 className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5"
@@ -99,7 +132,7 @@ export default function Patients() {
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="text-sm font-semibold text-white">
-                      {profile?.name ?? "Unregistered"}
+                      {p.name ?? "Unregistered"}
                     </div>
                     <div className="mt-0.5 font-mono text-xs text-zinc-500">
                       {p.address}
@@ -113,25 +146,25 @@ export default function Patients() {
                   <div className="flex items-center justify-between">
                     <span className="text-zinc-500">Blood type</span>
                     <span className="text-zinc-300">
-                      {profile?.bloodType ?? "—"}
+                      {p.bloodType ?? "—"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-zinc-500">DOB</span>
-                    <span className="text-zinc-300">{profile?.dob ?? "—"}</span>
+                    <span className="text-zinc-300">{p.dob ?? "—"}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-zinc-500">Provider</span>
                     <span className="max-w-[55%] truncate text-zinc-300">
-                      {profile?.primaryProvider ?? "—"}
+                      {p.primaryProvider ?? "—"}
                     </span>
                   </div>
                 </div>
-                {profile?.allergies && profile.allergies.length > 0 && (
+                {p.allergies && p.allergies.length > 0 && (
                   <div className="mt-3 border-t border-zinc-800 pt-3">
                     <div className="mb-1.5 text-xs text-zinc-500">Allergies</div>
                     <div className="flex flex-wrap gap-1.5">
-                      {profile.allergies.map((a) => (
+                      {p.allergies.map((a) => (
                         <Badge key={a} tone="red">
                           {a}
                         </Badge>
@@ -140,13 +173,14 @@ export default function Patients() {
                   </div>
                 )}
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
 
-        {list.length === 0 && (
+        {!isLoading && !isError && list.length === 0 && (
           <div className="rounded-lg border border-dashed border-zinc-800 p-10 text-center text-sm text-zinc-600">
-            No patients visible to you. {!isFullAccess && "Grant a consent to see patients."}
+            No patients visible to you.{" "}
+            {!canManage && "Grant a consent to see patients."}
           </div>
         )}
       </div>

@@ -1,37 +1,64 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useAppSelector } from "@/store/hooks";
 import {
-  providerProfiles,
-  patientProfiles,
-  type PatientProfile,
-} from "@/lib/dummy-data";
+  useProviderProfile,
+  usePatients,
+  useRecords,
+  useConsents,
+  useProviders,
+} from "@/hooks";
 import { roleAccent } from "@/lib/roles";
 import { typeMeta } from "@/lib/record-meta";
 import Card from "@/components/Card";
 import Badge from "@/components/Badge";
+import ProviderProfileForm from "@/components/profile/ProviderProfileForm";
+import { QueryError, CardGridSkeleton } from "@/components/QueryState";
 
 export default function ProviderDashboard() {
   const user = useAppSelector((s) => s.auth.user);
-  const records = useAppSelector((s) => s.records.list);
-  const consents = useAppSelector((s) => s.consents.list);
   const accent = user ? roleAccent[user.role] : roleAccent.provider;
+  const [editingProfile, setEditingProfile] = useState(false);
+
+  const { data: profile } = useProviderProfile(user?.address ?? "");
+  const {
+    data: patients,
+    isLoading: patientsLoading,
+    isError: patientsError,
+    error: patientsErr,
+  } = usePatients({ enabled: !!user });
+  const {
+    data: records,
+    isLoading: recordsLoading,
+    isError: recordsError,
+    error: recordsErr,
+  } = useRecords({ enabled: !!user });
+  const {
+    data: consents,
+    isLoading: consentsLoading,
+    isError: consentsError,
+    error: consentsErr,
+  } = useConsents({ enabled: !!user });
+  const { data: providers } = useProviders({ enabled: !!user });
 
   if (!user) return null;
 
-  const profile = providerProfiles.find((p) => p.address === user.address);
-  const isVerified = true;
-  const myConsents = consents.filter(
+  const self = (providers ?? []).find((p) => p.address === user.address);
+  const isVerified = self?.verified ?? false;
+  const myPatients = patients ?? [];
+  const myConsents = (consents ?? []).filter(
     (c) => c.providerAddress === user.address && c.active,
   );
   const consentedPatientAddresses = myConsents.map((c) => c.patientAddress);
-  const myPatients = patientProfiles.filter((p) =>
-    consentedPatientAddresses.includes(p.address),
-  ) as PatientProfile[];
-  const myPatientsRecords = records.filter(
+  const myPatientsRecords = (records ?? []).filter(
     (r) => consentedPatientAddresses.includes(r.patientAddress) && !r.tombstoned,
   );
+
+  const loading = patientsLoading || recordsLoading || consentsLoading;
+  const hasError = patientsError || recordsError || consentsError;
+  const error = patientsErr ?? recordsErr ?? consentsErr;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -56,18 +83,25 @@ export default function ProviderDashboard() {
             >
               Patient Records
             </Link>
+            <button
+              onClick={() => setEditingProfile(true)}
+              className="rounded-md border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:border-emerald-500/50 hover:text-emerald-300"
+            >
+              Edit Profile
+            </button>
           </div>
         </div>
       </div>
 
       <div className="flex-1 space-y-6 p-8">
+        {hasError && <QueryError error={error} />}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
             <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
               Active Consents
             </div>
             <div className={`mt-2 text-3xl font-semibold ${accent.text}`}>
-              {myConsents.length}
+              {consentsLoading ? "…" : myConsents.length}
             </div>
             <div className="mt-1 text-xs text-zinc-500">patients granted access</div>
           </div>
@@ -76,7 +110,7 @@ export default function ProviderDashboard() {
               Patients
             </div>
             <div className={`mt-2 text-3xl font-semibold ${accent.text}`}>
-              {myPatients.length}
+              {patientsLoading ? "…" : myPatients.length}
             </div>
             <div className="mt-1 text-xs text-zinc-500">under your care</div>
           </div>
@@ -85,7 +119,7 @@ export default function ProviderDashboard() {
               Records
             </div>
             <div className={`mt-2 text-3xl font-semibold ${accent.text}`}>
-              {myPatientsRecords.length}
+              {recordsLoading ? "…" : myPatientsRecords.length}
             </div>
             <div className="mt-1 text-xs text-zinc-500">accessible right now</div>
           </div>
@@ -98,58 +132,83 @@ export default function ProviderDashboard() {
                 {isVerified ? "Verified" : "Pending"}
               </Badge>
             </div>
-            <div className="mt-1 text-xs text-zinc-500">license {profile?.licenseNumber}</div>
+            <div className="mt-1 text-xs text-zinc-500">
+              license {profile?.licenseNumber}
+            </div>
           </div>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Card title="Consented Patients" subtitle="Patients who granted you access">
-            <ul className="divide-y divide-zinc-800">
-              {myPatients.map((p) => (
-                <li key={p.address} className="flex items-center justify-between py-3">
-                  <div>
-                    <div className="text-sm font-medium text-zinc-200">{p.name}</div>
-                    <div className="text-xs text-zinc-500">
-                      {p.bloodType} · {p.allergies.length ? p.allergies.join(", ") : "No allergies"}
+            {loading && !myPatients.length && <CardGridSkeleton count={3} />}
+            {!loading && (
+              <ul className="divide-y divide-zinc-800">
+                {myPatients.map((p) => (
+                  <li
+                    key={p.address}
+                    className="flex items-center justify-between py-3"
+                  >
+                    <div>
+                      <div className="text-sm font-medium text-zinc-200">
+                        {p.name}
+                      </div>
+                      <div className="text-xs text-zinc-500">
+                        {p.bloodType} ·{" "}
+                        {p.allergies?.length
+                          ? p.allergies.join(", ")
+                          : "No allergies"}
+                      </div>
                     </div>
-                  </div>
-                  <Badge tone="emerald">Consented</Badge>
-                </li>
-              ))}
-              {myPatients.length === 0 && (
-                <li className="py-6 text-center text-sm text-zinc-600">
-                  No patients have granted you access yet.
-                </li>
-              )}
-            </ul>
+                    <Badge tone="emerald">Consented</Badge>
+                  </li>
+                ))}
+                {myPatients.length === 0 && (
+                  <li className="py-6 text-center text-sm text-zinc-600">
+                    No patients have granted you access yet.
+                  </li>
+                )}
+              </ul>
+            )}
           </Card>
 
           <Card title="Recent Accessible Records" subtitle="Latest documents you can view">
-            <ul className="divide-y divide-zinc-800">
-              {myPatientsRecords.slice(0, 5).map((r) => {
-                const meta = typeMeta[r.recordType];
-                return (
-                  <li key={r.recordId} className="flex items-center gap-3 py-3">
-                    <span className="text-lg">{meta.icon}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm text-zinc-200">{r.title}</div>
-                      <div className="text-xs text-zinc-500">
-                        {r.date} · {r.hospital}
+            {loading && !myPatientsRecords.length && <CardGridSkeleton count={4} />}
+            {!loading && (
+              <ul className="divide-y divide-zinc-800">
+                {myPatientsRecords.slice(0, 5).map((r) => {
+                  const meta = typeMeta[r.recordType];
+                  return (
+                    <li key={r.recordId} className="flex items-center gap-3 py-3">
+                      <span className="text-lg">{meta.icon}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm text-zinc-200">
+                          {r.title}
+                        </div>
+                        <div className="text-xs text-zinc-500">
+                          {r.date} · {r.hospital}
+                        </div>
                       </div>
-                    </div>
-                    <Badge tone={meta.tone}>{meta.label}</Badge>
+                      <Badge tone={meta.tone}>{meta.label}</Badge>
+                    </li>
+                  );
+                })}
+                {myPatientsRecords.length === 0 && (
+                  <li className="py-6 text-center text-sm text-zinc-600">
+                    No records available under active consents.
                   </li>
-                );
-              })}
-              {myPatientsRecords.length === 0 && (
-                <li className="py-6 text-center text-sm text-zinc-600">
-                  No records available under active consents.
-                </li>
-              )}
-            </ul>
+                )}
+              </ul>
+            )}
           </Card>
         </div>
       </div>
+      {editingProfile && user && (
+        <ProviderProfileForm
+          address={user.address}
+          initial={profile ?? null}
+          onClose={() => setEditingProfile(false)}
+        />
+      )}
     </div>
   );
 }
