@@ -1,74 +1,143 @@
-import { createSlice } from "@reduxjs/toolkit";
+import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import type { PayloadAction } from "@reduxjs/toolkit";
-import { users, type Role, type User } from "@/lib/dummy-data";
+import { api, ApiError } from "@/lib/api";
+import type { Role, User } from "@/lib/dummy-data";
 
-export type WalletProvider = "metamask" | "walletconnect" | "coinbase";
-
-export interface Wallet {
-  address: string;
-  provider: WalletProvider;
-  connectedAt: string;
-}
+export type AuthStatus =
+  | "idle"
+  | "connecting"
+  | "resolving"
+  | "authenticated"
+  | "error";
 
 interface AuthState {
   user: User | null;
+  role: Role | null;
+  address: string | null;
   isAuthenticated: boolean;
-  wallet: Wallet | null;
+  isWalletConnected: boolean;
+  status: AuthStatus;
+  error: string | null;
+  /** True when /api/auth returned 404 for the connected wallet (needs register). */
+  unknownWallet: boolean;
 }
 
 const initialState: AuthState = {
   user: null,
+  role: null,
+  address: null,
   isAuthenticated: false,
-  wallet: null,
+  isWalletConnected: false,
+  status: "idle",
+  error: null,
+  unknownWallet: false,
 };
 
-const MOCK_ADDRESSES: Record<WalletProvider, string> = {
-  metamask: "0x9fF2a6B0c4D8e1f3A7b5C9d0E2f4A6b8C0d1E2f3",
-  walletconnect: "0x3aB7c9D1eF2a4B6c8D0e1F2a3B4c5D6e7F8a9B0c1",
-  coinbase: "0x5c8D0e2F4a6B8c0D1e3F5a7b9C1d3E5f7A9b1C3d5",
-};
-
-const shortMockAddress = (addr: string) =>
-  `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+export const resolveAuth = createAsyncThunk<
+  { user: User; role: Role },
+  string,
+  { rejectValue: { status?: number; message: string } }
+>(
+  "auth/resolve",
+  async (address, { rejectWithValue }) => {
+    try {
+      const result = await api.auth.resolve(address);
+      return result;
+    } catch (err) {
+      const status = err instanceof ApiError ? err.status : undefined;
+      return rejectWithValue({
+        status,
+        message:
+          err instanceof Error && err.message
+            ? err.message
+            : "Could not resolve identity",
+      });
+    }
+  },
+);
 
 const authSlice = createSlice({
   name: "auth",
   initialState,
   reducers: {
-    connectWallet: (state, action: PayloadAction<WalletProvider>) => {
-      const provider = action.payload;
-      const full = MOCK_ADDRESSES[provider];
-      state.wallet = {
-        address: shortMockAddress(full),
-        provider,
-        connectedAt: new Date().toISOString(),
-      };
+    connectWallet: (
+      state,
+      action: PayloadAction<{ address: string; provider: string }>,
+    ) => {
+      state.address = action.payload.address;
+      state.isWalletConnected = true;
+      state.status = "connecting";
+      state.error = null;
+      state.unknownWallet = false;
     },
-    loginAs: (state, action: PayloadAction<Role>) => {
-      const user = users.find((u) => u.role === action.payload);
-      if (user) {
-        state.user = user;
-        state.isAuthenticated = true;
-        state.wallet = {
-          address: user.address,
-          provider: state.wallet?.provider ?? "metamask",
-          connectedAt: new Date().toISOString(),
-        };
+    setSession: (
+      state,
+      action: PayloadAction<{ user: User; role?: Role }>,
+    ) => {
+      state.user = action.payload.user;
+      state.role = action.payload.role ?? action.payload.user.role;
+      state.isAuthenticated = true;
+      state.status = "authenticated";
+      state.error = null;
+      state.unknownWallet = false;
+    },
+    updateUser: (state, action: PayloadAction<Partial<User>>) => {
+      if (state.user) {
+        state.user = { ...state.user, ...action.payload };
       }
     },
+    setAuthError: (state, action: PayloadAction<string>) => {
+      state.status = "error";
+      state.error = action.payload;
+    },
     disconnectWallet: (state) => {
-      state.wallet = null;
       state.user = null;
+      state.role = null;
+      state.address = null;
       state.isAuthenticated = false;
+      state.isWalletConnected = false;
+      state.status = "idle";
+      state.error = null;
+      state.unknownWallet = false;
     },
     logout: (state) => {
-      state.wallet = null;
       state.user = null;
+      state.role = null;
       state.isAuthenticated = false;
+      state.status = "idle";
+      state.error = null;
+      state.unknownWallet = false;
     },
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(resolveAuth.pending, (state) => {
+        state.status = "resolving";
+        state.error = null;
+        state.unknownWallet = false;
+      })
+      .addCase(resolveAuth.fulfilled, (state, action) => {
+        state.user = action.payload.user;
+        state.role = action.payload.role;
+        state.isAuthenticated = true;
+        state.status = "authenticated";
+        state.error = null;
+        state.unknownWallet = false;
+      })
+      .addCase(resolveAuth.rejected, (state, action) => {
+        state.status = "error";
+        state.error = action.payload?.message ?? "Identity resolution failed";
+        state.unknownWallet = action.payload?.status === 404;
+      });
   },
 });
 
-export const { connectWallet, loginAs, disconnectWallet, logout } =
-  authSlice.actions;
+export const {
+  connectWallet,
+  setSession,
+  updateUser,
+  setAuthError,
+  disconnectWallet,
+  logout,
+} = authSlice.actions;
 export default authSlice.reducer;
