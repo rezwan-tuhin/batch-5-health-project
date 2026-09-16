@@ -7,6 +7,7 @@ import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { logout } from "@/store/slices/authSlice";
 import { shortWalletAddress } from "@/lib/format";
 import { useDisconnect } from "wagmi";
+import OnChainStatus from "@/components/OnChainStatus";
 import type { Role } from "@/lib/dummy-data";
 
 interface NavItem {
@@ -204,6 +205,8 @@ export default function Navbar() {
             </button>
           </div>
         )}
+
+        <OnChainStatus />
 
         <button
           onClick={handleLogout}
