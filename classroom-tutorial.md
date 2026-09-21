@@ -71,7 +71,24 @@ export async function anchorRecord(input, actor?) {
 > and a delete/toggle. Each one exists in `memory-db.ts` and `mongodb.ts`, and
 > `db.ts` just dispatches. Same signatures, identical JSON."
 
-### 3.3 The live flow (8 min)
+### 3.3 The pattern — the API seam (2 min)
+
+Every feature is exposed through the **same 4-layer seam** —
+`schema → db function → API route → hook`. You've seen the first two; now show
+the top two on Records:
+
+- **API route** — `src/app/api/records/route.ts`: `GET` returns
+  `listRecords()`, and the multipart `POST` pins the PDF (`addBytes` +
+  `hashBytes`) then calls `anchorRecord(...)` → `{ ...record, ipfsSimulated }`.
+- **Client** — `api.records.anchor(...)` in `src/lib/api.ts` (FormData upload)
+  + `useRecords()` in `src/hooks/index.ts`.
+
+> "Records has all four: schema → fixed `mongodb.ts` function → `/api/records`
+> route → `useRecords` hook. The other 8 collections follow the exact same 4
+> layers — in your homework you build the middle (B) for 7 of them, the routes
+> and hooks already exist."
+
+### 3.4 The live flow (8 min)
 
 1. `npm run dev` → **http://localhost:3000/login**.
 2. **Connect wallet** → Land on Register (new wallet) → choose **Patient**,
@@ -80,6 +97,8 @@ export async function anchorRecord(input, actor?) {
      `audits`).
    - 🔵 *Chain evidence:* MetaMask **tx #1** `registerPatient(didURI)`.
 3. Open **Records** → dropdown shows **You** → pick a `*.pdf` → **Anchor**.
+   - *While you wait, point at `src/app/api/records/route.ts` — this POST
+     handler is what just ran.*
    - 🔵 *IPFS evidence:* no amber warning; the record card shows a **real CID**.
    - 🔵 *Chain evidence:* MetaMask **tx #2** `anchorRecord(patient, recordId,
      recordHash, pointer)` — pointer is `ipfs://<real-cid>`.
@@ -103,6 +122,8 @@ are stored in the contract's `recordAnchors` mapping, and
 **Setup (teacher prepares once):** give each student a clone of the project
 with `src/server/models.ts`, `src/server/mongodb.ts`, `src/server/db-types.ts`,
 and `scripts/seed.ts` **removed** (Phase 4 stripped to what it was before).
+**Keep all `src/app/api/**` routes intact** — they will not compile or work
+until you rebuild the db layer, and they are your acceptance test.
 
 **Task:** re-create Phase 4 yourself using the two schemas shown in class as
 your template.
@@ -140,7 +161,8 @@ npm run dev
 | 4 | Projection `-__v -_id` and unique indexes on every schema | `PROJECTED_FIELDS` in `models.ts` | 10 |
 | 5 | `npm run lint` + server `tsc` clean | — | 10 |
 | 6 | Seed + backend parity (memory vs mongo JSON identical) | `npm run seed`, spot-check pages | 10 |
-| 7 | *Bonus:* one fresh collection end-to-end (schema → db fn → route → hook) | Records feature as template | 10+ |
+| 7 | Existing `/api/*` routes compile & return correct rows on every page (routes were kept intact — your db layer must satisfy them) | Atlas spot-check on all pages | 10 |
+| 8 | *Bonus:* one fresh collection end-to-end (schema → db fn → route → hook) | Records feature as template | 10+ |
 
 Deliverable files: `src/server/models.ts`, `src/server/mongodb.ts`,
 `src/server/db.types.ts`, `scripts/seed.ts`, `path/package.json` (add `seed`,
