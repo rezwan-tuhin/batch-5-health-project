@@ -36,15 +36,35 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function requestForm<T>(path: string, body: FormData): Promise<T> {
+  const res = await fetch(path, { method: "POST", body });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(res.status, text || `Request failed (${res.status})`);
+  }
+  return (await res.json()) as T;
+}
+
 export type PatientListItem = Patient & Partial<PatientProfile>;
 export type ProviderListItem = Provider & Partial<ProviderProfile>;
 export type ConsentListItem = Consent & { patientName?: string };
-export type RecordListItem = RecordAnchor & { patientName?: string };
+export type RecordListItem = RecordAnchor & {
+  patientName?: string;
+  ipfsSimulated?: boolean;
+};
 export type EmergencyListItem = EmergencyAccess & { patientName?: string };
 
 export interface AuthResult {
   user: User;
   role: Role;
+}
+
+export interface IpfsStatus {
+  configured: boolean;
+  backend: "http" | "pinata";
+  gateway: string;
+  apiUrl: string;
+  online: boolean;
 }
 
 interface MockEndpointMap {
@@ -147,16 +167,34 @@ export const api = {
     anchor: (payload: {
       patientAddress: string;
       title: string;
-      recordHash: string;
+      recordHash?: string;
       pointer?: string;
       anchoredBy?: string;
       providerName?: string;
       hospital?: string;
-    }) =>
-      request<RecordListItem>(ep("records"), {
+      file?: File;
+    }) => {
+      if (payload.file) {
+        const form = new FormData();
+        form.append("patientAddress", payload.patientAddress);
+        form.append("title", payload.title);
+        form.append("file", payload.file);
+        for (const key of [
+          "recordHash",
+          "pointer",
+          "anchoredBy",
+          "providerName",
+          "hospital",
+        ] as const) {
+          if (payload[key]) form.append(key, payload[key]);
+        }
+        return requestForm<RecordListItem>(ep("records"), form);
+      }
+      return request<RecordListItem>(ep("records"), {
         method: "POST",
         body: JSON.stringify(payload),
-      }),
+      });
+    },
     tombstone: (payload: { patientAddress: string; recordId: string }) =>
       request<{ ok: true }>(
         ep(
@@ -192,6 +230,10 @@ export const api = {
 
   audit: {
     list: () => request<AuditEntry[]>(ep("audit")),
+  },
+
+  ipfs: {
+    status: () => request<IpfsStatus>("/api/ipfs/status"),
   },
 
   patientProfiles: {

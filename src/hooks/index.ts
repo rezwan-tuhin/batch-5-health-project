@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import type {
   ConsentListItem,
   EmergencyListItem,
+  IpfsStatus,
   PatientListItem,
   ProviderListItem,
   RecordListItem,
@@ -19,6 +20,7 @@ export const queryKeys = {
   emergency: ["emergency"] as const,
   audit: ["audit"] as const,
   users: ["users"] as const,
+  ipfs: ["ipfs-status"] as const,
   patientProfile: (address: string) => ["patient-profile", address] as const,
   providerProfile: (address: string) => ["provider-profile", address] as const,
 };
@@ -82,6 +84,15 @@ export function useUsers(opts: HookOptions = defaultEnabled) {
     queryKey: queryKeys.users,
     queryFn: api.users.list,
     enabled: opts.enabled,
+  });
+}
+
+export function useIpfsStatus(opts: HookOptions = defaultEnabled) {
+  return useQuery<IpfsStatus>({
+    queryKey: queryKeys.ipfs,
+    queryFn: api.ipfs.status,
+    enabled: opts.enabled,
+    staleTime: 60_000,
   });
 }
 

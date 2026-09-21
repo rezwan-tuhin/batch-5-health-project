@@ -8,6 +8,7 @@ import type {
   Provider,
   ProviderProfile,
   RecordAnchor,
+  RecordContent,
   RecordType,
   Role,
   User,
@@ -390,6 +391,9 @@ export function anchorRecord(
     title: string;
     recordHash: string;
     pointer?: string;
+    ipfsCid?: string;
+    fileName?: string;
+    content?: RecordContent;
     anchoredBy?: string;
     providerName?: string;
     hospital?: string;
@@ -397,7 +401,7 @@ export function anchorRecord(
   },
   actor?: AuditActor,
 ) {
-  const ipfsCid = makeIpfsCid();
+  const ipfsCid = input.ipfsCid ?? makeIpfsCid();
   const rec: RecordAnchor = {
     patientAddress: input.patientAddress,
     recordId: makeRecordId(),
@@ -412,9 +416,10 @@ export function anchorRecord(
     date: new Date().toISOString().slice(0, 10),
     providerName: input.providerName ?? actor?.name ?? "Unknown physician",
     hospital: input.hospital ?? "—",
-    content: {},
+    content: input.content ?? {},
     hashVerified: true,
   };
+  if (input.fileName) rec.fileName = input.fileName;
   records.push(rec);
   const patient = patients.find((x) => x.address === input.patientAddress);
   appendAudit(

@@ -106,6 +106,7 @@ export interface RecordAnchor {
   hospital: string;
   content: RecordContent;
   hashVerified: boolean;
+  fileName?: string;
 }
 
 export interface EmergencyAccess {

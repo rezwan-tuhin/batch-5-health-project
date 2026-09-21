@@ -10,6 +10,7 @@ import {
   useRecords,
   useEmergency,
   useAudit,
+  useIpfsStatus,
 } from "@/hooks";
 import { roleAccent } from "@/lib/roles";
 import Card from "@/components/Card";
@@ -26,6 +27,7 @@ export default function AdminDashboard() {
   const { data: consents } = useConsents({ enabled: !!user });
   const { data: records } = useRecords({ enabled: !!user });
   const { data: emergency } = useEmergency({ enabled: !!user });
+  const { data: ipfs } = useIpfsStatus({ enabled: !!user });
   const {
     data: audit,
     isLoading: auditLoading,
@@ -158,7 +160,23 @@ export default function AdminDashboard() {
               </li>
               <li className="flex items-center justify-between">
                 <span className="text-zinc-400">IPFS gateway</span>
-                <Badge tone="emerald">Online</Badge>
+                <Badge
+                  tone={
+                    !ipfs?.configured
+                      ? "zinc"
+                      : ipfs.online
+                        ? "emerald"
+                        : "amber"
+                  }
+                >
+                  {!ipfs
+                    ? "Loading"
+                    : !ipfs.configured
+                      ? "Not configured"
+                      : ipfs.online
+                        ? "Online"
+                        : "Configured"}
+                </Badge>
               </li>
               <li className="flex items-center justify-between">
                 <span className="text-zinc-400">Contract paused</span>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAppSelector } from "@/store/hooks";
 import { api } from "@/lib/api";
@@ -23,7 +23,8 @@ export default function Records() {
   const [viewing, setViewing] = useState<RecordListItem | null>(null);
   const [patient, setPatient] = useState("");
   const [title, setTitle] = useState("");
-  const [recordHash, setRecordHash] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -43,7 +44,7 @@ export default function Records() {
 
   const submitAnchor = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!patient || !title || !recordHash) return;
+    if (!patient || !title || !file) return;
     setSubmitting(true);
     setNotice(null);
     setFormError(null);
@@ -51,15 +52,20 @@ export default function Records() {
       const record = await api.records.anchor({
         patientAddress: patient,
         title,
-        recordHash,
+        file,
         anchoredBy: user.address,
         providerName: user.name,
       });
+      if (record.ipfsSimulated) {
+        setNotice(
+          "IPFS not configured — CID is simulated. Set IPFS_API_URL (or a Pinata JWT) and restart to pin real PDFs.",
+        );
+      }
       try {
         await chainAnchorRecord({
           patientAddress: patient,
           recordId: record.recordId,
-          recordHash,
+          recordHash: record.recordHash,
           pointer: record.pointer,
         });
       } catch (err) {
@@ -74,7 +80,8 @@ export default function Records() {
       await queryClient.invalidateQueries({ queryKey: queryKeys.records });
       setPatient("");
       setTitle("");
-      setRecordHash("");
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to anchor record");
     } finally {
@@ -162,10 +169,11 @@ export default function Records() {
                 className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-emerald-500"
               />
               <input
-                value={recordHash}
-                onChange={(e) => setRecordHash(e.target.value)}
-                placeholder="Record hash (bytes32)"
-                className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-sm text-white placeholder-zinc-500 outline-none focus:border-emerald-500"
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white file:mr-3 file:rounded file:border-0 file:bg-emerald-500/20 file:px-3 file:py-1 file:text-xs file:font-medium file:text-emerald-300 outline-none focus:border-emerald-500"
               />
               <button
                 type="submit"
@@ -175,6 +183,10 @@ export default function Records() {
                 {submitting ? "Anchoring…" : "Anchor"}
               </button>
             </form>
+            <p className="mt-3 text-xs text-zinc-600">
+              Upload a PDF — its keccak256 is computed server-side and pinned to
+              IPFS; the CID + hash are anchored on-chain.
+            </p>
             {formError && <QueryError error={new Error(formError)} />}
             {notice && <InlineNotice>{notice}</InlineNotice>}
           </Card>

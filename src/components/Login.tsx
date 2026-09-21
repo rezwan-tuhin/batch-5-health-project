@@ -172,8 +172,8 @@ export default function Login() {
         </div>
 
         <div className="mt-8 text-center text-xs text-zinc-600">
-          Wallet connected via RainbowKit · Backend, contract writes and IPFS
-          are still simulated
+          Wallet connected via RainbowKit · Backend and contract writes simulated
+          · IPFS activates when configured
         </div>
       </div>
     </div>

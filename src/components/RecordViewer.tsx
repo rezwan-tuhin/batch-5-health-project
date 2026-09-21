@@ -18,6 +18,14 @@ function copyToClipboard(text: string) {
   navigator.clipboard?.writeText(text).catch(() => {});
 }
 
+const ipfsGateway =
+  process.env.NEXT_PUBLIC_IPFS_READ_GATEWAY?.trim().replace(/\/+$/, "") ||
+  "https://ipfs.io";
+
+function openOnIpfs(cid: string) {
+  window.open(`${ipfsGateway}/ipfs/${cid}`, "_blank", "noopener,noreferrer");
+}
+
 export default function RecordViewer({
   record,
   onClose,
@@ -207,6 +215,12 @@ export default function RecordViewer({
           )}
 
           <section className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+            {record.fileName && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-zinc-500">Document</span>
+                <span className="text-zinc-300">{record.fileName}</span>
+              </div>
+            )}
             <div>
               <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                 IPFS Content Identifier
@@ -223,6 +237,12 @@ export default function RecordViewer({
                 </button>
               </div>
             </div>
+            <button
+              onClick={() => openOnIpfs(record.ipfsCid)}
+              className="w-full rounded-md bg-sky-500/15 px-3 py-2 text-xs font-medium text-sky-300 hover:bg-sky-500/25"
+            >
+              Open on IPFS ({ipfsGateway.replace(/^https?:\/\//, "")})
+            </button>
             <div className="flex items-center justify-between text-xs">
               <span className="text-zinc-500">On-chain hash integrity</span>
               <Badge tone={record.hashVerified ? "emerald" : "red"}>
