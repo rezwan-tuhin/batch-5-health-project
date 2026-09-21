@@ -10,7 +10,7 @@ export async function GET(
 ) {
   void request;
   const { address } = await params;
-  const profile = getPatientProfile(address);
+  const profile = await getPatientProfile(address);
   if (!profile) {
     return NextResponse.json({ error: "Profile not found" }, { status: 404 });
   }
@@ -39,5 +39,5 @@ export async function PATCH(
     );
   }
   const input: PatientProfile = { ...body, address };
-  return NextResponse.json(upsertPatientProfile(input));
+  return NextResponse.json(await upsertPatientProfile(input));
 }

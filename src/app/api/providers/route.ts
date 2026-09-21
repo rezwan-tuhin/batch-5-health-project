@@ -4,7 +4,7 @@ import { listProviders, registerProvider } from "@/server/db";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(listProviders());
+  return NextResponse.json(await listProviders());
 }
 
 export async function POST(request: Request) {
@@ -15,5 +15,5 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  return NextResponse.json(registerProvider(body), { status: 201 });
+  return NextResponse.json(await registerProvider(body), { status: 201 });
 }

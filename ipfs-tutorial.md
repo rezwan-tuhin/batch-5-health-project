@@ -158,7 +158,7 @@ if (contentType.includes("multipart/form-data")) {
     else return 502;                          // real backend failure
   }
 
-  const record = anchorRecord({
+  const record = await anchorRecord({
     patientAddress, title,
     recordHash: hashBytes(bytes),             // keccak256(pdf) — on-chain fingerprint
     pointer, ipfsCid, fileName: file.name || "record.pdf",
@@ -309,9 +309,11 @@ npm run dev   # http://localhost:3000/login
 
 ## 11. Known limits (accepted for this phase)
 
-- **In-memory DB**: CIDs live in the seeded `db.ts` store and vanish on restart.
-  Wiring Mongoose (Phase 4) keeps the same seams — `anchorRecord` signatures are
-  unchanged.
+- **CID persistence depends on the DB backend** (Phase 4 changed this): with
+  `MONGODB_URI` set, records — and their CIDs — persist in MongoDB Atlas;
+  without it the seeded in-memory store is used and CIDs vanish on restart.
+  `anchorRecord` signatures are unchanged (now `async` through the `db.ts`
+  facade).
 - **Gateway reachability**: public gateways may be slow or block certain CIDs;
   the app doesn't retry behind-the-scenes on read.
 - **Pinning persistence** is the provider's job: Pinata pins automatically; a

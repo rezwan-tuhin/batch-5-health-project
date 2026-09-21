@@ -16,7 +16,7 @@ export async function PATCH(
     );
   }
   return NextResponse.json(
-    verifyProvider({
+    await verifyProvider({
       address,
       isVerified: body.isVerified,
       erQualified: Boolean(body.erQualified),

@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   if (!address) {
     return NextResponse.json({ error: "Missing address" }, { status: 400 });
   }
-  const user = resolveUser(address);
+  const user = await resolveUser(address);
   if (!user) {
     return NextResponse.json(
       { error: "Unknown wallet address — register an account first" },
@@ -26,6 +26,6 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const user = signup(body);
+  const user = await signup(body);
   return NextResponse.json({ user, role: user.role }, { status: 201 });
 }

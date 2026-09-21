@@ -4,7 +4,7 @@ import { grantConsent, listConsents } from "@/server/db";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(listConsents());
+  return NextResponse.json(await listConsents());
 }
 
 export async function POST(request: Request) {
@@ -21,5 +21,5 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  return NextResponse.json(grantConsent(body), { status: 201 });
+  return NextResponse.json(await grantConsent(body), { status: 201 });
 }

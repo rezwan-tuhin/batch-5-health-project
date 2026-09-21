@@ -4,7 +4,7 @@ import { listEmergency, triggerEmergency } from "@/server/db";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(listEmergency());
+  return NextResponse.json(await listEmergency());
 }
 
 export async function POST(request: Request) {
@@ -22,5 +22,5 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  return NextResponse.json(triggerEmergency(body), { status: 201 });
+  return NextResponse.json(await triggerEmergency(body), { status: 201 });
 }

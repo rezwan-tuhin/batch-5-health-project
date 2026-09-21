@@ -9,7 +9,7 @@ export async function GET(
 ) {
   void request;
   const { address } = await params;
-  const profile = getProviderProfile(address);
+  const profile = await getProviderProfile(address);
   if (!profile) {
     return NextResponse.json({ error: "Profile not found" }, { status: 404 });
   }
@@ -35,5 +35,5 @@ export async function PATCH(
       { status: 400 },
     );
   }
-  return NextResponse.json(upsertProviderProfile({ ...body, address }));
+  return NextResponse.json(await upsertProviderProfile({ ...body, address }));
 }

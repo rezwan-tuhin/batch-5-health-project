@@ -11,6 +11,6 @@ export async function PATCH(
 ) {
   const { patient, recordId } = await params;
   return NextResponse.json(
-    tombstoneRecord({ patientAddress: patient, recordId }),
+    await tombstoneRecord({ patientAddress: patient, recordId }),
   );
 }

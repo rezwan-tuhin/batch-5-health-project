@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
     "@rainbow-me/rainbowkit": "^2.2.11",
@@ -16,6 +17,7 @@
     "@x402/evm": "^2.25.0",
     "@x402/extensions": "^2.25.0",
     "@x402/svm": "^2.25.0",
+    "mongoose": "^8.24.4",
     "next": "16.3.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -31,6 +33,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }

@@ -11,5 +11,10 @@ export async function DELETE(
 ) {
   void request;
   const { patient, provider } = await params;
-  return NextResponse.json(revokeConsent({ patientAddress: patient, providerAddress: provider }));
+  return NextResponse.json(
+    await revokeConsent({
+      patientAddress: patient,
+      providerAddress: provider,
+    }),
+  );
 }

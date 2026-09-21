@@ -11,7 +11,7 @@ function formValue(form: FormData, key: string): string | undefined {
 }
 
 export async function GET() {
-  return NextResponse.json(listRecords());
+  return NextResponse.json(await listRecords());
 }
 
 export async function POST(request: Request) {
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const record = anchorRecord({
+    const record = await anchorRecord({
       patientAddress,
       title,
       recordHash: hashBytes(bytes),
@@ -87,5 +87,5 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  return NextResponse.json(anchorRecord(body), { status: 201 });
+  return NextResponse.json(await anchorRecord(body), { status: 201 });
 }

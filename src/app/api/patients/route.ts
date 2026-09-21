@@ -4,7 +4,7 @@ import { listPatients, registerPatient } from "@/server/db";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(listPatients());
+  return NextResponse.json(await listPatients());
 }
 
 export async function POST(request: Request) {
@@ -15,5 +15,5 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  return NextResponse.json(registerPatient(body), { status: 201 });
+  return NextResponse.json(await registerPatient(body), { status: 201 });
 }

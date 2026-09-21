@@ -9,5 +9,5 @@ export async function PATCH(
 ) {
   void request;
   const { patient } = await params;
-  return NextResponse.json(expireEmergency({ patientAddress: patient }));
+  return NextResponse.json(await expireEmergency({ patientAddress: patient }));
 }
