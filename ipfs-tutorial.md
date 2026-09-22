@@ -2,14 +2,14 @@
 
 This is the step-by-step guide to wiring **real IPFS content-addressed storage**
 into the HealthRecord app, replacing the *simulated* CIDs that Phases 1–2
-generated in `src/server/db.ts` (`makeIpfsCid()`).
+generated in the db layer (`makeIpfsCid()`).
 
 After this phase:
 
 - The **Anchor Record** form on `/records` takes a **PDF file** instead of a
   typed `recordHash` string.
 - The backend computes `keccak256(pdfBytes)`, pushes the PDF to IPFS, stores the
-  real CID (`pointer = ipfs://<cid>`) in the in-memory DB, and anchors the hash +
+  real CID (`pointer = ipfs://<cid>`) in the database, and anchors the hash +
   pointer on-chain exactly as before.
 - The **RecordViewer** shows the pinned filename and an **"Open on IPFS"**
   gateway link for the CID.
@@ -41,7 +41,7 @@ typed "not wired" error, which the UI catches and degrades gracefully.
 - **Hash derived from the file.** Previously the user typed a `recordHash`.
   Now the hash is `keccak256` of the actual PDF bytes — so the on-chain hash
   genuinely fingerprints the pinned document.
-- **DB stays the mirror.** The in-memory DB keeps storing `content`/metadata so
+- **DB stays the mirror.** The database keeps storing `content`/metadata so
   the existing UI and API shapes are unchanged; IPFS is additive at the seams.
 - **Route handler is the integration point.** `src/app/api/records/route.ts`
   already accepted a JSON `POST`; it now also accepts `multipart/form-data`.
@@ -191,8 +191,8 @@ anchorRecord(input: {
 // if (input.fileName) rec.fileName = input.fileName
 ```
 
-`RecordAnchor` in `dummy-data.ts` adds `fileName?: string` (additive — seed rows
-don't need it).
+`RecordAnchor` in `dummy-data.ts` adds `fileName?: string` (additive — existing
+rows don't need it).
 
 ---
 
@@ -250,8 +250,8 @@ const ipfsGateway = process.env.NEXT_PUBLIC_IPFS_READ_GATEWAY?.replace(/\/+$/, "
 </button>
 ```
 
-Structured `content` sections still render for seed records (the DB mirror), so
-nothing breaks for pre-existing rows.
+Structured `content` sections still render for stored records (the DB mirror),
+so nothing breaks for pre-existing rows.
 
 ---
 
@@ -309,11 +309,10 @@ npm run dev   # http://localhost:3000/login
 
 ## 11. Known limits (accepted for this phase)
 
-- **CID persistence depends on the DB backend** (Phase 4 changed this): with
-  `MONGODB_URI` set, records — and their CIDs — persist in MongoDB Atlas;
-  without it the seeded in-memory store is used and CIDs vanish on restart.
-  `anchorRecord` signatures are unchanged (now `async` through the `db.ts`
-  facade).
+- **CID persistence** (Phase 4): records — and their CIDs — persist in MongoDB
+  Atlas, which is now the app's only backend (`MONGODB_URI` is required; no
+  seed, no in-memory fallback). `anchorRecord` signatures are unchanged (now
+  `async` through the `db.ts` barrel).
 - **Gateway reachability**: public gateways may be slow or block certain CIDs;
   the app doesn't retry behind-the-scenes on read.
 - **Pinning persistence** is the provider's job: Pinata pins automatically; a

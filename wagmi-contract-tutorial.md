@@ -83,7 +83,7 @@ components already `await` inside event handlers and catch
    - If `NEXT_PUBLIC_CONTRACT_ADDRESS` is empty **or** not a `0x` + 40-hex
      address the seam reports "not configured" and every write degrades
      gracefully (Phase 1 behavior).
-3. The seed accounts in `src/lib/dummy-data.ts` use short placeholder addresses
+3. The demo accounts in `src/lib/dummy-data.ts` use short placeholder addresses
    (e.g. `0x7C8d...a1B2`). Connect a **real** wallet and register fresh on-chain
    accounts to see writes succeed.
 

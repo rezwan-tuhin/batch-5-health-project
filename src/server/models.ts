@@ -2,9 +2,8 @@
  * Mongoose schemas (Phase 4 — MongoDB persistence).
  *
  * Models mirror the `dummy-data.ts` types one-to-one. Every read path projects
- * away `_id`/`__v`, so API responses stay byte-identical to the in-memory
- * backend. Numeric `id` is kept for User/AuditEntry because the UI renders
- * those keys.
+ * away `_id`/`__v`, so API responses stay stable and compact. Numeric `id` is
+ * kept for User/AuditEntry because the UI renders those keys.
  *
  * NOTE: schemas are deliberately untyped. Mongoose's generic `Schema<T>` /
  * `model<T>` types decompile the checker pathologically slow (>5 min / OOM on
@@ -17,7 +16,7 @@
  */
 import { Schema, type Model, model, models } from "mongoose";
 
-/** Mongo projection used on every read so API JSON matches the memory backend. */
+/** Mongo projection used on every read so API JSON stays stable. */
 export const PROJECTED_FIELDS = "-_id -__v";
 
 export const ROLES = [

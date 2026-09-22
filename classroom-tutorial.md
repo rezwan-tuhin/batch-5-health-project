@@ -24,7 +24,7 @@ schemas, and the remaining seven becomes identical homework.
 In `.env.local` (or the Vercel env vars):
 
 ```env
-MONGODB_URI=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net   # Phase 4
+MONGODB_URI=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net   # Phase 4 (required)
 IPFS_BACKEND=pinata                                               # Phase 3
 IPFS_API_URL=https://uploads.pinata.cloud/v3/files
 IPFS_API_TOKEN=<pinata_jwt>
@@ -34,7 +34,8 @@ NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=<real project id>           # Phase 1
 ```
 
 - One **MetaMask wallet on Sepolia** with a little test ETH (covers 2 txs).
-- Atlas whitelists your IP; `npm run seed` once so the 9 collections exist.
+- Atlas whitelists your IP (collections auto-create on first write — there is
+  no seed script anymore).
 - Pinata key verified (upload a throwaway file from the Pinata UI first).
 - The contract is deployed and `NEXT_PUBLIC_CONTRACT_ADDRESS` is valid.
 
@@ -47,8 +48,8 @@ NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=<real project id>           # Phase 1
 Open `src/server/models.ts`. Point at `userSchema` and `recordAnchorSchema`:
 
 - Every collection's fields mirror a type in `src/lib/dummy-data.ts`.
-- Every read projects away `_id`/`__v` (`PROJECTED_FIELDS`) so API JSON matches
-  the memory backend.
+- Every read projects away `_id`/`__v` (`PROJECTED_FIELDS`) so API JSON stays
+  stable.
 - Unique indexes where the app keys by address/`id`.
 
 > "There are **9 collections** in `models.ts` and they all look like these two.
@@ -59,17 +60,15 @@ Open `src/server/models.ts`. Point at `userSchema` and `recordAnchorSchema`:
 ### 3.2 The pattern — three db functions (2 min)
 
 Open `src/server/mongodb.ts` for `listRecords`, `anchorRecord`; then
-`src/server/db.ts` for the facade:
+`src/server/db.ts` for the barrel:
 
 ```ts
-export async function anchorRecord(input, actor?) {
-  return useMongo ? mongo.anchorRecord(input, actor) : memory.anchorRecord(input, actor);
-}
+export * from "@/server/mongodb";
 ```
 
 > "Every collection needs the same 3 kinds of functions — list, create/update,
-> and a delete/toggle. Each one exists in `memory-db.ts` and `mongodb.ts`, and
-> `db.ts` just dispatches. Same signatures, identical JSON."
+> and a delete/toggle. They all live in `mongodb.ts`, and `db.ts` just
+> re-exports them as the single import point for the `/api/*` routes."
 
 ### 3.3 The pattern — the API seam (2 min)
 
@@ -108,8 +107,10 @@ the top two on Records:
    `https://ipfs.io/ipfs/<cid>`.
 5. **Restart the server** (`Ctrl+C`, `npm run dev` again) → login again → the
    record is still there. *It survived a restart: real database.*
-6. `npm run seed` → the record is gone again (fresh seed). *Same seam, same
-   shapes — the demo store vs the real store are interchangeable.*
+6. Check Atlas: `recordanchors` (and `users`/`audits`) contain the rows you
+   just wrote. Delete the record doc in Atlas, refresh Records → the card is
+   gone. *Real database, no seed and no cache — what's in Atlas is what the UI
+   shows.*
 
 Optional 1 min: check the tx on Sepolia Etherscan — `pointer` and `recordHash`
 are stored in the contract's `recordAnchors` mapping, and
@@ -120,34 +121,36 @@ are stored in the contract's `recordAnchors` mapping, and
 ## 4. Homework — rebuild the remaining schemas
 
 **Setup (teacher prepares once):** give each student a clone of the project
-with `src/server/models.ts`, `src/server/mongodb.ts`, `src/server/db-types.ts`,
-and `scripts/seed.ts` **removed** (Phase 4 stripped to what it was before).
-**Keep all `src/app/api/**` routes intact** — they will not compile or work
-until you rebuild the db layer, and they are your acceptance test.
+with `src/server/models.ts`, `src/server/mongodb.ts`, and
+`src/server/db-types.ts` **removed**. **Keep all `src/app/api/**` routes
+intact** — they will not compile or work until you rebuild the db layer, and
+they are your acceptance test.
 
-**Task:** re-create Phase 4 yourself using the two schemas shown in class as
-your template.
+**Task:** re-create the db layer yourself using the two schemas shown in class
+as your template.
 
 1. Write the other **7 Mongoose schemas** — `Patient`, `PatientProfile`,
    `Provider`, `ProviderProfile`, `Consent`, `EmergencyAccess`, `Audit` — in
    `src/server/models.ts`, matching the interfaces in `src/lib/dummy-data.ts`.
 2. Regenerate `src/server/mongodb.ts` functions for those collections so every
-   `/api/*` response is **byte-identical** to `src/server/memory-db.ts` (which
-   you keep as reference).
+   `/api/*` response returns correct rows — mirror the two functions shown in
+   class (`listRecords`/`anchorRecord`) and the `dummy-data.ts` shapes.
 3. Add `MONGODB_URI` to `.env.local`, run the app against Atlas.
+
+> There is **no seeding** in this phase: collections start empty and are
+> created by real app usage, so tests are about your own written rows.
 
 **Acceptance criteria:**
 
 ```bash
 npm run lint
 npx tsc --noEmit --incremental false -p tsconfig.scoped.json
-npm run seed
 npm run dev
 ```
 
 - All pages render and write correct rows (check Atlas).
-- Flip `MONGODB_URI` off (`memory`) vs on (`mongo`) → identical JSON on every
-  page (no amber network errors).
+- Registered/uploaded data survives server restarts (real persistence).
+- Missing `MONGODB_URI` → API calls fail loudly (500); MongoDB is required.
 
 ---
 
@@ -157,13 +160,12 @@ npm run dev
 | --- | --- | --- | --- |
 | 1 | `userSchema` / `recordAnchorSchema` shown in class (pattern) | exists | — |
 | 2 | 7 new Mongoose schemas | interfaces in `src/lib/dummy-data.ts` | 30 |
-| 3 | 7 collections of `mongodb.ts` functions | `src/server/memory-db.ts` (copy the logic) | 40 |
+| 3 | 7 collections of `mongodb.ts` functions | the two functions shown in class + `dummy-data.ts` shapes | 40 |
 | 4 | Projection `-__v -_id` and unique indexes on every schema | `PROJECTED_FIELDS` in `models.ts` | 10 |
 | 5 | `npm run lint` + server `tsc` clean | — | 10 |
-| 6 | Seed + backend parity (memory vs mongo JSON identical) | `npm run seed`, spot-check pages | 10 |
+| 6 | Live round trip: register/upload → rows appear in Atlas and survive restart (no seed) | spot-check pages against Atlas | 10 |
 | 7 | Existing `/api/*` routes compile & return correct rows on every page (routes were kept intact — your db layer must satisfy them) | Atlas spot-check on all pages | 10 |
 | 8 | *Bonus:* one fresh collection end-to-end (schema → db fn → route → hook) | Records feature as template | 10+ |
 
 Deliverable files: `src/server/models.ts`, `src/server/mongodb.ts`,
-`src/server/db.types.ts`, `scripts/seed.ts`, `path/package.json` (add `seed`,
-`mongoose`, `tsx`).
+`src/server/db-types.ts`, `path/package.json` (add `mongoose`).

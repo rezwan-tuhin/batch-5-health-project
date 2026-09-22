@@ -7,7 +7,6 @@
   "include": [
     "next-env.d.ts",
     "src/server/**/*.ts",
-    "scripts/**/*.ts",
     "src/lib/dummy-data.ts"
   ]
 }

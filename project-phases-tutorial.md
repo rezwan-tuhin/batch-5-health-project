@@ -21,10 +21,10 @@ so later phases never require rewriting earlier ones.
 | Phase | Name | Tutorial | Env to enable | Depends on |
 | --- | --- | --- | --- | --- |
 | 0 | Foundation — scaffold + UI shell | — | none | — |
-| 1 | Wallet auth + REST API + in-memory DB | `wagmi-setup-tutorial.md` | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | 0 |
+| 1 | Wallet auth + REST API + database facade | `wagmi-setup-tutorial.md` | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | 0 |
 | 2 | Smart contract ledger | `wagmi-contract-tutorial.md` | `NEXT_PUBLIC_CONTRACT_ADDRESS` | 1 |
 | 3 | IPFS file storage | `ipfs-tutorial.md` | `IPFS_BACKEND`, `IPFS_API_URL`, `IPFS_API_TOKEN`, `NEXT_PUBLIC_IPFS_READ_GATEWAY` | 2 |
-| 4 | MongoDB persistence | `mongodb-tutorial.md` | `MONGODB_URI` | 1 (independent of 2/3) |
+| 4 | MongoDB persistence (only backend) | `mongodb-tutorial.md` | `MONGODB_URI` (required) | 1 (independent of 2/3) |
 
 The dependency order is reflected in the git history:
 
@@ -50,7 +50,7 @@ store. No real wallet, no network, no database.
 | `src/app/layout.tsx`, `src/app/globals.css`, `src/app/page.tsx` | Root shell |
 | `src/app/login/page.tsx`, `src/app/register/page.tsx` | Auth pages |
 | `src/app/patients/page.tsx`, `src/app/providers/page.tsx`, `src/app/consents/page.tsx`, `src/app/records/page.tsx`, `src/app/emergency/page.tsx` | Feature pages |
-| `src/lib/dummy-data.ts` | Single source of seed data (users, patients, providers, records, consents, audit) |
+| `src/lib/dummy-data.ts` | Shared domain types + demo data (kept as reference; no longer seeded into the DB) |
 | `src/lib/roles.ts`, `src/lib/access.ts`, `src/lib/record-meta.ts` | Role rules, access gating, record metadata helpers |
 | `src/lib/contract.sol` | The smart-contract source (compile + deploy elsewhere) |
 | `src/store/store.ts`, `src/store/hooks.ts`, `src/store/Providers.tsx`, `src/store/slices/*` | Offline Redux store |
@@ -60,11 +60,12 @@ store. No real wallet, no network, no database.
 
 ---
 
-## 4. Phase 1 — Wallet auth + REST API + in-memory DB
+## 4. Phase 1 — Wallet auth + REST API + database facade
 
 The app becomes real: sign in with a wallet, and every screen now reads/writes
-through `/api/*` handlers backed by an in-memory "database" (`db.ts`, seeded
-from `dummy-data.ts`).
+through `/api/*` handlers backed by a database facade (`db.ts`). The Phase-1
+backend was an in-memory store seeded from `dummy-data.ts`; Phase 4 replaced it
+with MongoDB, so `db.ts` is now a thin re-export of the Mongo backend.
 
 ### Files
 
@@ -74,7 +75,7 @@ from `dummy-data.ts`).
 | `src/components/WalletBridge.tsx`, `src/components/WalletConnectButton.tsx` | Connect wallet → Redux session + hydration-safe button |
 | `src/store/Providers.tsx`, `src/store/slices/authSlice.ts`, `src/hooks/index.ts` | Query + auth store, data hooks |
 | `src/lib/api.ts` | Typed fetch client for every endpoint |
-| `src/server/db.ts` | In-memory database (arrays seeded from `dummy-data.ts`) |
+| `src/server/db.ts` | Database facade (in-memory in Phase 1; MongoDB since Phase 4) |
 | `src/app/api/auth/route.ts` | `GET` resolve wallet, `POST` signup |
 | `src/app/api/patients/route.ts`, `src/app/api/providers/route.ts`, `src/app/api/providers/[address]/route.ts` | Patients / providers + verify |
 | `src/app/api/profiles/patients/[address]/route.ts`, `src/app/api/profiles/providers/[address]/route.ts` | Profile get/update |
@@ -124,7 +125,7 @@ CIDs with an amber notice.
 | `src/app/api/records/route.ts` | Multipart `POST` — pin PDF + anchor record |
 | `src/components/Records.tsx`, `src/components/RecordViewer.tsx`, `src/components/admin/AdminDashboard.tsx` | Upload form, open-on-gateway, network-health badge |
 | `src/hooks/index.ts` (`useIpfsStatus`), `src/lib/api.ts` (file upload + status) | Client plumbing |
-| `src/lib/dummy-data.ts` (`fileName`) | Additive seed field |
+| `src/lib/dummy-data.ts` (`fileName`) | Additive `fileName` field on `RecordAnchor` |
 
 **Enable:** `IPFS_BACKEND` (`http` or `pinata`), `IPFS_API_URL`, `IPFS_API_TOKEN`, `NEXT_PUBLIC_IPFS_READ_GATEWAY`.
 
@@ -132,23 +133,24 @@ CIDs with an amber notice.
 
 ## 7. Phase 4 — MongoDB persistence
 
-The in-memory DB becomes a facade: `MONGODB_URI` set → Mongoose/Atlas, empty →
-old memory store. API responses stay byte-identical either way.
+MongoDB becomes the **only** backend: the Phase-1 in-memory store is removed,
+and all the seed tooling goes with it. `db.ts` is now a thin barrel that
+re-exports the Mongoose backend, so the API JSON shapes stay untouched.
 
 ### Files
 
 | Path | Role |
 | --- | --- |
-| `src/server/db.ts` | Facade — picks Mongo vs memory backend, all exports async |
-| `src/server/memory-db.ts` | The Phase-1 in-memory implementation (now the fallback) |
-| `src/server/mongodb.ts` | Mongoose implementation of every db function |
+| `src/server/db.ts` | Barrel — re-exports every db function from `mongodb.ts` |
+| `src/server/mongodb.ts` | Mongoose implementation of every db function (lazy connect, projection, audit) |
 | `src/server/models.ts` | Mongoose schemas (9 collections) |
-| `src/server/db-types.ts` | Shared input types for both backends |
-| `scripts/seed.ts` | Drop + reseed script (`npm run seed`) |
+| `src/server/db-types.ts` | Shared input types for the db layer |
 | `tsconfig.scoped.json`, `tsconfig.probe-models.json` | Fast type-check scopes for the server layer |
-| `src/app/api/**` | Route handlers updated to `await` the async facade |
+| `src/app/api/**` | Route handlers (unchanged — they already `await` the async facade) |
 
-**Enable:** `MONGODB_URI`.
+**Required:** `MONGODB_URI` — there is no fallback and no seeding. The
+`scripts/seed.ts` file and `npm run seed` script were removed; collections
+start empty and are created on first insert.
 
 ---
 

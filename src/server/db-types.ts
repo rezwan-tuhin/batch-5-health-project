@@ -1,6 +1,6 @@
 import type { RecordContent, RecordType, Role } from "@/lib/dummy-data";
 
-/** Shared input types for the two db backends (memory + mongo). */
+/** Shared input types for the database layer. */
 export interface AuditActor {
   name: string;
   role: string;

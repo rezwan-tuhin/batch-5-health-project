@@ -2,25 +2,26 @@
 
 ## 1. What this phase does
 
-Replaces the browser/demo-grade **in-memory** store (plain JS arrays seeded from
-`dummy-data.ts`) with a **real MongoDB database** — MongoDB Atlas — while keeping
-every `/api/*` response byte-identical for both backends.
+MongoDB is the app's **only** database backend. All UI reads/writes go through
+`/api/*` route handlers backed by **MongoDB Atlas** via Mongoose. There is no
+in-memory fallback and no seed data: collections start empty and are created on
+first insert as the app is used.
 
-Nothing on the client changes. Every API handler keeps the same shape and status
-codes; only the behind-the-scenes storage differs.
+Nothing on the client changes — MongoDB just gives the API permanent
+persistence that survives server restarts.
 
-### Design: the `db.ts` facade
+### Design: the `db.ts` barrel
 
-`src/server/db.ts` is the single import point for all API routes. On module load
-it checks `MONGODB_URI`:
+`src/server/db.ts` is the single import point for all API routes. It does not
+pick between backends anymore (there is only one):
 
-| `MONGODB_URI` | Backend | Persistence |
-| --- | --- | --- |
-| empty | `src/server/memory-db.ts` | in-memory, resets on restart |
-| set | `src/server/mongodb.ts` (Mongoose) | MongoDB Atlas, survives restart |
+```ts
+export * from "@/server/mongodb";     // every db function
+export type { AuditActor } from "@/server/db-types";
+```
 
-All facade functions are `async` so routes never need to know which backend is
-live. Both backends implement the same 19 functions with identical JSON shapes.
+All the exported functions are `async` (they lazily connect then query), so the
+route handlers never deal with the connection lifecycle.
 
 ## 2. Prerequisites
 
@@ -39,20 +40,19 @@ MONGODB_URI=mongodb+srv://<user>:<password>@cluster0.xxxxx.mongodb.net
 `.env.local` is git-ignored. Copy `.env.local.example` for the full list of
 environment variables used by earlier phases (wallet, contract, IPFS).
 
-> Leave `MONGODB_URI` empty to keep using the seeded in-memory store — the app
-> behaves identically, but data is lost on restart.
+> `MONGODB_URI` is **required**. Without it every `/api/*` call fails loudly
+> with `[mongo] MONGODB_URI is not configured`. There is no fallback to hide a
+> missing connection string.
 
 ## 4. Files in this phase
 
 | File | Purpose |
 | --- | --- |
-| `src/server/db.ts` | Facade — picks memory vs Mongo, exports async functions |
-| `src/server/memory-db.ts` | Old in-memory implementation (now the fallback) |
+| `src/server/db.ts` | Barrel — re-exports all db functions, single import point |
 | `src/server/mongodb.ts` | Mongoose implementation of all db functions |
 | `src/server/models.ts` | Mongoose schemas (9 collections) |
-| `src/server/db-types.ts` | Shared input types for both backends |
-| `scripts/seed.ts` | Drop + reseed script (`npm run seed`) |
-| `tsconfig.scoped.json` | Fast type-check of server + scripts only |
+| `src/server/db-types.ts` | Shared input types for the db layer |
+| `tsconfig.scoped.json` | Fast type-check of the server layer only |
 | `tsconfig.probe-models.json` | Scope-check for `models.ts` during authoring |
 
 ### Collections (9)
@@ -60,40 +60,38 @@ environment variables used by earlier phases (wallet, contract, IPFS).
 `users`, `patients`, `patientProfiles`, `providers`, `providerProfiles`,
 `consents`, `recordanchors`, `emergencyaccesses`, `audits`.
 
+Collections are created lazily by MongoDB on first insert — nothing seeds them.
+
 ### Dependencies added
 
 ```bash
-npm install mongoose          # runtime
-npm install -D tsx            # runs scripts/seed.ts
+npm install mongoose          # runtime — the only dependency this phase adds
 ```
-
-`package.json` gains `"seed": "tsx scripts/seed.ts"`.
 
 ## 5. How it works
 
-- **Connect + auto-seed** — `mongodb.ts` connects once (module-level promise,
-  `dbName: "health"`) and seeds the 9 collections from `dummy-data.ts` on first
-  connect, only when a collection is empty. A fresh Atlas cluster is therefore
-  pixel-identical to the in-memory demo.
-- **Projection** — every read projects away `_id`/`__v` (`PROJECTED_FIELDS`), so
-  API JSON matches the memory backend exactly.
+- **Connect on demand** — the first db call connects once (a memoized
+  module-level promise, `dbName: "health"`), then every function reuses that
+  connection. Failure (bad URI, unreachable cluster) rejects loudly.
+- **Projection** — every read projects away `_id`/`__v` (`PROJECTED_FIELDS`),
+  so API JSON stays stable and compact.
 - **Profile merge** — `listPatients`/`listProviders`/`listConsents`/`listRecords`/
-  `listEmergency` enrich rows with `patientName`/provider fields exactly like the
-  memory backend does.
+  `listEmergency` enrich rows with `patientName`/provider fields.
 - **Audit** — writes append an entry to `audits` with an auto-incremented numeric
-  `id`, matching the memory behavior.
+  `id`.
 
-## 6. Seeding / resetting
+## 6. Starting empty / resetting
 
-The app auto-seeds when `MONGODB_URI` is set and a collection is empty. To force
-a clean slate (drop all collections, reseed from `dummy-data.ts`):
+There is **no seed script and no auto-seed**. A fresh cluster starts with 9
+empty collections; your first `signup`/`registerPatient`/`anchorRecord` creates
+them.
+
+To reset the demo to a clean slate, delete the collections (or the whole
+`health` database) in the Atlas UI, or run:
 
 ```bash
-npm run seed
+mongosh "mongodb+srv://<user>:<password>@cluster0.xxxxx.mongodb.net/health" --eval "db.dropDatabase()"
 ```
-
-The script loads `.env.local` itself, so it works outside Next.js. Verify the
-counts printed in the table match the seed data.
 
 ## 7. Verify
 
@@ -103,19 +101,20 @@ npm run build
 npm run dev     # http://localhost:3000/login
 ```
 
-1. **Without `MONGODB_URI`** → same app as before; register/upload data, restart
-   the server, data resets to the seed.
-2. **With `MONGODB_URI`** → use the app normally, restart the server, the data
-   you created is still there.
-3. **After `npm run seed`** → data resets to the seed.
+1. With `MONGODB_URI` set → use the app normally (sign up, register a patient,
+   anchor a record), restart the server, and the data you created is still there.
+2. Open Atlas → the 9 collections now exist with rows matching your activity.
+3. **Without `MONGODB_URI`** → every API call returns 500 with a clear
+   `[mongo] MONGODB_URI is not configured` error. That is intentional — MongoDB
+   is required.
 
 ## 8. Troubleshooting
 
 | Symptom | Cause / fix |
 | --- | --- |
-| Every API call returns 500 after setting `MONGODB_URI` | Cluster unreachable: check the user/password, the connection string, and that your IP is whitelisted in Atlas **Network Access**. |
-| `npm run seed` exits with "MONGODB_URI is not set" | Add it to `.env.local` (or pass it inline in the environment). |
-| Data changes but a route still shows stale seed rows | The app connected to a *different* Atlas cluster/db than the one you seeded; confirm `MONGODB_URI` in `.env.local`. |
+| Every API call returns 500 with `MONGODB_URI is not configured` | `MONGODB_URI` is missing/empty in `.env.local` — add the Atlas connection string. |
+| Every API call returns 500 (connection error) after setting `MONGODB_URI` | Cluster unreachable: check the user/password, the connection string, and that your IP is whitelisted in Atlas **Network Access**. |
+| Pages show data you didn't create | `MONGODB_URI` points at a *different* Atlas cluster/db than the one you're inspecting; confirm the string in `.env.local`. |
 | Duplicate key error on rapid writes (E11000) | Rare race in auto-incremented `id` allocation under concurrent writes — retry the request. |
 
 ## 9. Roadmap — SIWE-style API auth (how to add)
@@ -151,10 +150,10 @@ helper used by the route handlers.
 
 ## 10. Known limits (accepted for this phase)
 
+- **MongoDB is required** — there is no in-memory fallback. Without
+  `MONGODB_URI` the DB layer fails loudly (500), so a missing connection string
+  is visible instead of silently hidden behind a throwaway store.
 - **Auto-increment `id` race** — `nextNumericId()` reads the max `id` then
   inserts; two writes at the same instant can collide on the unique `id` index
   (E11000 → the request is rejected). Acceptable for demo traffic; a production
   version would use an atomic counter or ObjectId.
-- **No graceful fallback** — once `MONGODB_URI` is set, an unreachable cluster
-  makes API calls fail loudly (500) rather than silently falling back to memory,
-  so misconfiguration is visible instead of hidden.

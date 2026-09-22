@@ -1,14 +1,15 @@
 /**
- * MongoDB backend (Phase 4 — persistence).
+ * MongoDB backend.
  *
- * Mongoose implementation of every `src/server/db.ts` function, selected by the
- * facade when `MONGODB_URI` is configured. Seeded idempotently from
- * `dummy-data.ts` on first connect, so a fresh Atlas cluster is pixel-identical
- * to the in-memory demo.
+ * Mongoose implementation of every database function, re-exported through
+ * `db.ts` as the single import point for the `/api/*` route handlers. MongoDB
+ * (Atlas or any reachable cluster) is the only backend — there is no
+ * in-memory fallback and no seeding. `MONGODB_URI` must be configured or
+ * every connection throws loudly.
  *
- * All reads project away `_id`/`__v` so API JSON matches the memory backend
- * exactly. Where a doc must be updated afterwards, it is re-read with `_id`
- * projected in and removed from the returned shape. Results are cast to the
+ * All reads project away `_id`/`__v` so API JSON stays stable and compact.
+ * Where a doc must be updated afterwards, it is re-read with `_id` projected
+ * in and removed from the returned shape. Results are cast to the
  * `dummy-data.ts` shapes at the typed boundaries below.
  */
 import mongoose from "mongoose";
@@ -22,17 +23,6 @@ import type {
   ProviderProfile,
   RecordAnchor,
   User,
-} from "@/lib/dummy-data";
-import {
-  auditLog,
-  initialConsents,
-  initialEmergencyAccess,
-  initialPatients,
-  initialProviders,
-  initialRecords,
-  patientProfiles as seedPatientProfiles,
-  providerProfiles as seedProviderProfiles,
-  users as seedUsers,
 } from "@/lib/dummy-data";
 import {
   AuditModel,
@@ -67,82 +57,30 @@ type Doc = Record<string, unknown>;
    types (QueryWithHelpers, HydratedDocument, FlattenMaps…) decompile
    pathologically slow on this machine, so the model layer is typed `Model<any>`.
    Every result is cast to the `dummy-data.ts` shapes at the typed boundaries
-   below, which is exactly what the memory backend guarantees at runtime. */
+   below. */
 type MongoModel = mongoose.Model<any>;
 
-export function isMongoConfigured(): boolean {
-  return !!(process.env.MONGODB_URI ?? "").trim();
-}
-
 let connectPromise: Promise<void> | null = null;
-let hasSeeded = false;
 
 async function connectToDatabase(): Promise<void> {
   const uri = (process.env.MONGODB_URI ?? "").trim();
   if (!uri) {
     throw new Error(
-      "[mongo] MONGODB_URI is not configured — cannot use the Mongo backend.",
+      "[mongo] MONGODB_URI is not configured — MongoDB is the only backend, " +
+        "so the database layer requires a connection string.",
     );
   }
   if (mongoose.connection.readyState !== 1) {
     await mongoose.connect(uri, { dbName: "health" });
   }
-  if (!hasSeeded) {
-    await seedIfEmpty();
-    hasSeeded = true;
-  }
 }
 
-export async function ensureConnected(): Promise<void> {
+async function ensureConnected(): Promise<void> {
   connectPromise ??= connectToDatabase().catch((err) => {
     connectPromise = null;
     throw err;
   });
   await connectPromise;
-}
-
-// ---------------------------------------------------------------------------
-// Seeding
-// ---------------------------------------------------------------------------
-
-async function seedIfEmpty(): Promise<void> {
-  const seeds: Array<[MongoModel, unknown[]]> = [
-    [UserModel, seedUsers],
-    [PatientModel, initialPatients],
-    [PatientProfileModel, seedPatientProfiles],
-    [ProviderModel, initialProviders],
-    [ProviderProfileModel, seedProviderProfiles],
-    [ConsentModel, initialConsents],
-    [RecordAnchorModel, initialRecords],
-    [EmergencyModel, initialEmergencyAccess],
-    [AuditModel, auditLog],
-  ];
-  for (const [model, docs] of seeds) {
-    const count = await model.countDocuments();
-    if (count === 0 && docs.length > 0) {
-      await (model as unknown as {
-        insertMany: (d: unknown[]) => Promise<unknown>;
-      }).insertMany(docs);
-    }
-  }
-}
-
-/** Drop every collection and reseed from `dummy-data.ts` (used by `npm run seed`). */
-export async function reseedDatabase(): Promise<void> {
-  await ensureConnected();
-  await Promise.all(
-    [UserModel, PatientModel, PatientProfileModel, ProviderModel,
-      ProviderProfileModel, ConsentModel, RecordAnchorModel, EmergencyModel,
-      AuditModel].map((m) => m.deleteMany({})),
-  );
-  await seedIfEmpty();
-  hasSeeded = true;
-}
-
-/** Disconnect so standalone scripts can exit cleanly. */
-export async function disconnectDatabase(): Promise<void> {
-  await mongoose.disconnect();
-  hasSeeded = false;
 }
 
 // ---------------------------------------------------------------------------
